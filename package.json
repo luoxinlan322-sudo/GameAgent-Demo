@@ -1,0 +1,49 @@
+{
+  "name": "gameagent-demo",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "端到端 AI 游戏生成系统 — 从一句话需求到可运行的 HTML5 游戏，全链路由 AI Agent 驱动。",
+  "keywords": [
+    "ai-agent",
+    "game-design",
+    "llm",
+    "phaser",
+    "html5-game",
+    "procedural-generation",
+    "next.js"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/luoxinlan322-sudo/GameAgent-Demo.git"
+  },
+  "author": "Xinlan Luo <luoxinlan322@gmail.com>",
+  "scripts": {
+    "dev": "next dev --hostname 0.0.0.0 --port 3000",
+    "build": "next build",
+    "start": "next start --hostname 0.0.0.0 --port 3000",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@langfuse/client": "^5.0.1",
+    "@langfuse/otel": "^5.0.1",
+    "@langfuse/tracing": "^5.0.1",
+    "@opentelemetry/sdk-node": "^0.213.0",
+    "next": "^16.2.1",
+    "openai": "^6.7.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "autoprefixer": "^10.4.27",
+    "eslint": "^9.39.4",
+    "eslint-config-next": "^16.2.1",
+    "postcss": "^8.5.8",
+    "tailwindcss": "^4.2.2",
+    "typescript": "^5.9.3"
+  }
+}
