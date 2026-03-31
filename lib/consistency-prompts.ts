@@ -14,6 +14,7 @@ function jsonOnlyInstruction(fields: string[]) {
     "Return one valid JSON object only.",
     "Do not output markdown, explanation, code fences, or wrappers.",
     `Top-level fields must be: ${fields.join(", ")}`,
+    "所有 issues / evidence / rationale 等自然语言字段必须使用中文输出。字段名（key）保持英文。",
   ].join(" ");
 }
 

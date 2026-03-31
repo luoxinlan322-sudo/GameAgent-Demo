@@ -35,6 +35,7 @@ export function jsonOnlyInstruction(keys: string[]) {
     "5. Keep field types exact. Arrays must stay arrays. Booleans must be true/false.",
     "6. If a field expects an array, split ideas into short items instead of one long sentence.",
     "7. 所有面向玩家或策划的文本内容（描述、名称、解释、文案等）必须使用中文输出。JSON 字段名（key）保持英文不变。",
+    "8. entityId 使用英文蛇形命名（如 campfire_station）；entityName、描述、文案等面向人的字段必须是中文。",
   ].join("\n");
 }
 
@@ -45,7 +46,38 @@ export function productionGradeInstruction(toolName: string, focus: string[]) {
     "2. Every field should be actionable, decomposable, and reusable. Avoid vague high-level planning prose.",
     "3. Keep scope controlled, but do not under-specify. The result should be prototype-complete, not merely minimal.",
     `4. Priority for this tool in this round: ${focus.join("; ")}.`,
+    "",
+    chineseTermGlossary(),
   ].join("\n");
+}
+
+/**
+ * Glossary block that maps English prompt terms to their Chinese equivalents.
+ * Injected into generation-tool prompts to prevent LLM from echoing English domain terms.
+ */
+export function chineseTermGlossary() {
+  return `
+【语言规范】本项目面向中文策划团队，JSON value 中的所有自然语言内容必须使用中文。
+常见术语对照（输出时使用右侧中文，禁止直接输出左侧英文原词）：
+- order → 订单 / 需求 / 委托
+- faucet → 产出 / 收入来源
+- sink → 消耗 / 支出
+- expansion → 扩建 / 扩展
+- decoration → 装饰 / 装扮
+- facility → 设施
+- building → 建筑
+- visitor / NPC → 访客 / 旅人 / NPC角色
+- hotspot → 热点区域 / 交互点
+- carrier → 载体
+- resource token → 资源道具
+- upgrade threshold → 升级阈值
+- pacing → 节奏控制
+- monetization hook → 付费钩子
+- feedback → 反馈
+- slot → 槽位
+- runtime target → 运行时挂载目标
+注意：entityId 保持英文蛇形命名不变（如 campfire_station），仅 entityName 和描述类字段使用中文。
+`.trim();
 }
 
 export function fewShotBlock(title: string, examples: Array<{ input: string; output: string }>) {
