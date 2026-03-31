@@ -14,7 +14,7 @@ import type {
   SystemDesign,
   UIInformationArchitecture,
 } from "../schemas";
-import type { RepairPlan } from "../agent-consistency-schemas";
+import type { RepairPlan, RepairAttemptRecord } from "../agent-consistency-schemas";
 import {
   briefBlock,
   fewShotBlock,
@@ -25,6 +25,7 @@ import {
   productionGradeInstruction,
   repairChecklistBlock,
   repairContextBlock,
+  repairHistoryBlock,
 } from "./prompt-blocks";
 import { stageRepairGuidance } from "../llm/structured-chat";
 import {

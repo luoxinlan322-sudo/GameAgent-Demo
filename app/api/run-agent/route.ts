@@ -108,6 +108,13 @@ export async function POST(request: Request) {
   const stream = new ReadableStream({
     async start(controller) {
       let streamClosed = false;
+      // Heartbeat to prevent SSE/proxy timeout on long-running agent sessions
+      const heartbeatInterval = setInterval(() => {
+        if (streamClosed) { clearInterval(heartbeatInterval); return; }
+        try {
+          controller.enqueue(encoder.encode(`{"type":"heartbeat","ts":${Date.now()}}\n`));
+        } catch { streamClosed = true; clearInterval(heartbeatInterval); }
+      }, 15_000);
       const push = (payload: EventPayload) => {
         // 在推送到流之前做一次轻量的输出裁剪，避免 downstream 校验因单条字符串过长而失败
         const sanitize = (obj: any) => {
@@ -434,6 +441,7 @@ export async function POST(request: Request) {
         push({ type: "error", error: message });
         push({ type: "stage", stage: "error", message, currentStep: "运行异常", stageTimings: [...stageTimings] });
       } finally {
+        clearInterval(heartbeatInterval);
         if (!streamClosed) {
           try {
             controller.close();

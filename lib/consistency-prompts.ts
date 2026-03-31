@@ -1,5 +1,5 @@
 import type { AgentPlan, CreativePack, GameProposal, IntentAnalysis, PersonaInput, ToolName } from "./schemas";
-import type { ConsistencyEdgeResult, ConsistencyReport, LocalRepairDecision, RepairPlan } from "./agent-consistency-schemas";
+import type { ConsistencyEdgeResult, ConsistencyReport, LocalRepairDecision, RepairPlan, RepairAttemptRecord } from "./agent-consistency-schemas";
 
 function jsonBlock(label: string, value: unknown) {
   return `${label}:\n${JSON.stringify(value, null, 2)}`;
@@ -171,7 +171,12 @@ export function buildLocalRepairDecisionPrompt(params: {
   localRepairCount: number;
   globalRepairCount: number;
   previousDecision?: LocalRepairDecision | null;
+  repairAttemptHistory?: RepairAttemptRecord[];
 }) {
+  const historyContext = params.repairAttemptHistory && params.repairAttemptHistory.length > 0
+    ? `\n修复历史 (已尝试 ${params.repairAttemptHistory.length} 次):\n${params.repairAttemptHistory.slice(-3).map((a) => `  第${a.attemptNumber}次: 目标=${a.targetEdges.join(",")} → 仍失败=${a.stillFailedEdges.join(",") || "待检查"}`).join("\n")}\n如果同一边连续失败 3+ 次，考虑选择不同的修复工具或建议在全局层面解决。`
+    : "";
+
   return `
 You are local_repair_decider.
 Decide whether the agent should repair immediately after the current tool, or continue.
@@ -207,5 +212,6 @@ ${compactJson("global_repair_count", params.globalRepairCount)}
 ${compactJson("artifact_context", params.artifactContext)}
 ${jsonBlock("consistency_report", params.consistencyReport)}
 ${jsonBlock("previous_local_decision", params.previousDecision ?? null)}
+${historyContext}
 `.trim();
 }

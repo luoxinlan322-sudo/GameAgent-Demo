@@ -74,3 +74,32 @@ export function createLangfuseScores(params: {
   score("agent_output_completeness", params.metrics.outputCompleteness, "关键输出完成度，范围 0-1");
   score("agent_run_success", params.metrics.runSuccess ? 1 : 0, "本次运行是否成功完成");
 }
+
+export function tagRepairIteration(params: {
+  traceId?: string;
+  runId: string;
+  sessionId: string;
+  triggerTool: string;
+  localRepairCount: number;
+  failedEdges: string[];
+  repairGoal: string;
+  stillFailedEdges?: string[];
+}) {
+  const client = getLangfuseClient();
+  if (!client || !params.traceId) return;
+
+  client.score.create({
+    traceId: params.traceId,
+    name: "local_repair_iteration",
+    value: params.localRepairCount,
+    comment: `[${params.triggerTool}] 局部修复第${params.localRepairCount}次 → 失败边: ${params.failedEdges.join(",")}`,
+    metadata: {
+      runId: params.runId,
+      sessionId: params.sessionId,
+      triggerTool: params.triggerTool,
+      repairGoal: params.repairGoal,
+      failedEdges: params.failedEdges,
+      stillFailedEdges: params.stillFailedEdges,
+    },
+  } as never);
+}

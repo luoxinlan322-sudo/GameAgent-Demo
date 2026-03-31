@@ -16,6 +16,7 @@ import {
   type ConsistencySemanticReview,
   type LocalRepairDecision,
   type RepairPlan,
+  type RepairAttemptRecord,
 } from "./agent-consistency-schemas";
 import type { AgentPlan, ConsistencyEdgeId, CreativePack, GameProposal, IntentAnalysis, PersonaInput, ToolName } from "./schemas";
 
@@ -346,6 +347,7 @@ export async function runLocalRepairDecisionTool(
   globalRepairCount: number,
   ctx: ToolContext,
   previousDecision?: LocalRepairDecision | null,
+  repairAttemptHistory?: RepairAttemptRecord[],
 ) {
   const fallback: LocalRepairDecision = {
     shouldRepairNow: consistencyReport.hardFailures.length > 0,
@@ -371,6 +373,7 @@ export async function runLocalRepairDecisionTool(
       localRepairCount,
       globalRepairCount,
       previousDecision,
+      repairAttemptHistory,
     }),
     schema: LocalRepairDecisionSchema,
     schemaName: "local_repair_decision",

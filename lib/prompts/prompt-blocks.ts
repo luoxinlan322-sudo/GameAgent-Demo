@@ -1,5 +1,5 @@
 import type { GenreFeatureProfile, PersonaInput } from "../schemas";
-import type { RepairPlan } from "../agent-consistency-schemas";
+import type { RepairPlan, RepairAttemptRecord, RepairPlanWithHistory } from "../agent-consistency-schemas";
 
 export function genreOptionalFieldsBlock(profile?: GenreFeatureProfile | null): string {
   if (!profile) return "";
@@ -81,14 +81,33 @@ ${repairContext || "First round. No repair context yet."}`;
 export function previousOutputBlock(baseline: unknown) {
   if (!baseline) return "";
   const json = JSON.stringify(baseline, null, 2);
-  const truncated = json.length > 8000 ? json.slice(0, 8000) + "\n... (truncated)" : json;
+  const limit = 8000;
+  let truncated: string;
+  if (json.length > limit) {
+    // Smart truncation: preserve tail (often contains assetLabels, characterCardCopy etc.)
+    const headSize = Math.floor(limit * 0.55);
+    const tailSize = limit - headSize - 60;
+    truncated = json.slice(0, headSize) + "\n... (中间截断，保留首尾关键部分) ...\n" + json.slice(-tailSize);
+  } else {
+    truncated = json;
+  }
   return `\nPrevious output baseline (preserve valid content, only patch the failed parts):\n${truncated}\nREPAIR RULE: Do NOT rewrite from scratch. Keep all valid fields from the baseline. Only fix the specific issues described in the Repair checklist.`;
 }
 
-export function repairChecklistBlock(repairPlan: RepairPlan | null | undefined, stageGuidance?: string) {
+export function repairChecklistBlock(repairPlan: RepairPlanWithHistory | RepairPlan | null | undefined, stageGuidance?: string) {
   if (!repairPlan) return "";
 
   const lines: string[] = ["\n═══ REPAIR CHECKLIST (you MUST fix every item below) ═══"];
+
+  // Inject repair history if available (from RepairPlanWithHistory)
+  const planWithHistory = repairPlan as RepairPlanWithHistory;
+  if (planWithHistory._repairAttemptHistory && planWithHistory._repairAttemptHistory.length > 0) {
+    lines.push(repairHistoryBlock(
+      planWithHistory._repairAttemptHistory,
+      planWithHistory._currentAttempt ?? planWithHistory._repairAttemptHistory.length + 1,
+      planWithHistory._maxAttempts ?? 8,
+    ));
+  }
 
   // Repair goal
   lines.push(`Repair goal: ${repairPlan.repairGoal}`);
@@ -135,4 +154,69 @@ export function repairChecklistBlock(repairPlan: RepairPlan | null | undefined, 
 export function jsonBlock(title: string, value: unknown) {
   return `${title}:
 ${JSON.stringify(value, null, 2)}`;
+}
+
+/**
+ * Build a repair history block that shows the LLM what was tried in previous
+ * local repair iterations and why those attempts failed.
+ * This gives the LLM "repair memory" so it doesn't repeat the same strategy.
+ */
+export function repairHistoryBlock(
+  history: RepairAttemptRecord[],
+  currentAttempt: number,
+  maxAttempts: number,
+) {
+  if (!history || history.length === 0) return "";
+
+  const lines: string[] = [];
+
+  // Progressive urgency header
+  if (currentAttempt >= 5) {
+    lines.push(`\n🚨 CRITICAL: 这是第 ${currentAttempt}/${maxAttempts} 次修复尝试。前 ${history.length} 次均未成功。你必须采用完全不同的修复策略。`);
+    lines.push("如果之前的修复只是微调措辞或添加少量内容，这次必须重组结构、重新映射标识符、或从上游依赖中重新提取关键信息。");
+  } else if (currentAttempt >= 3) {
+    lines.push(`\n⚠ WARNING: 这是第 ${currentAttempt}/${maxAttempts} 次修复尝试。前 ${history.length} 次尝试未解决问题。请换一个不同的修复角度。`);
+  }
+
+  lines.push(`\n═══ 修复历史 (已尝试 ${history.length} 次，当前第 ${currentAttempt} 次) ═══`);
+
+  for (const attempt of history.slice(-4)) {  // Show last 4 attempts max
+    lines.push(`\n--- 第 ${attempt.attemptNumber} 次修复 [${attempt.repairedTool}] ---`);
+    lines.push(`  目标: ${attempt.repairGoal}`);
+    lines.push(`  目标边: ${attempt.targetEdges.join(", ")}`);
+    if (attempt.changeSummary) {
+      lines.push(`  实际修改: ${attempt.changeSummary}`);
+    }
+    if (attempt.stillFailedEdges.length > 0) {
+      lines.push(`  ✗ 修复后仍失败: ${attempt.stillFailedEdges.join(", ")}`);
+    }
+    if (attempt.remainingIssues.length > 0) {
+      for (const issue of attempt.remainingIssues.slice(0, 3)) {
+        lines.push(`    - ${issue}`);
+      }
+    }
+  }
+
+  // Extract persistent failure patterns
+  const edgeFailCounts = new Map<string, number>();
+  for (const attempt of history) {
+    for (const edge of attempt.stillFailedEdges) {
+      edgeFailCounts.set(edge, (edgeFailCounts.get(edge) || 0) + 1);
+    }
+  }
+  const persistentEdges = [...edgeFailCounts.entries()]
+    .filter(([, count]) => count >= 2)
+    .map(([edge, count]) => `${edge}(连续失败${count}次)`);
+
+  if (persistentEdges.length > 0) {
+    lines.push(`\n⚠ 顽固失败模式: ${persistentEdges.join(", ")}`);
+    lines.push("这些边在多轮修复中持续失败，说明之前的修复策略无效。你必须从根本上改变方法：");
+    lines.push("  1. 检查上游输入是否就缺少必要信息（如果是，直接在输出中补充缺失映射）");
+    lines.push("  2. 检查 strictIdentifiers 是否被准确逐字使用（不要改写、缩写或替代）");
+    lines.push("  3. 检查数组/列表是否包含了所有必需项（不要遗漏，宁多勿少）");
+  }
+
+  lines.push("═══ 修复历史结束 ═══");
+
+  return lines.join("\n");
 }

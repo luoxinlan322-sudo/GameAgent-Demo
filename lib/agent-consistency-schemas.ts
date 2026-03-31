@@ -117,3 +117,32 @@ export type LocalRepairDecision = z.infer<typeof LocalRepairDecisionSchema>;
 export type ConsistencySemanticReview = z.infer<typeof ConsistencySemanticReviewSchema>;
 export type FailedEdgeDetail = z.infer<typeof FailedEdgeDetailSchema>;
 export type ProblemLocationHint = z.infer<typeof ProblemLocationHintSchema>;
+
+/** Record of a single local repair attempt — used to build repair memory across iterations */
+export type RepairAttemptRecord = {
+  /** 1-based local repair iteration number */
+  attemptNumber: number;
+  /** Which tool was repaired */
+  repairedTool: string;
+  /** Which edges were targeted */
+  targetEdges: string[];
+  /** What the repair instructions said (abbreviated) */
+  repairGoal: string;
+  /** Which edges still failed after this attempt */
+  stillFailedEdges: string[];
+  /** Specific issues that REMAINED after the attempt */
+  remainingIssues: string[];
+  /** What the LLM actually changed (derived from diff or summary) */
+  changeSummary: string;
+};
+
+/**
+ * Extended RepairPlan with runtime repair history metadata.
+ * These fields are NOT part of the LLM schema — they're attached
+ * by the repair loop and consumed by prompt builders.
+ */
+export type RepairPlanWithHistory = RepairPlan & {
+  _repairAttemptHistory?: RepairAttemptRecord[];
+  _currentAttempt?: number;
+  _maxAttempts?: number;
+};

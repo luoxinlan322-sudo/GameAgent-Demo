@@ -1,4 +1,5 @@
 ﻿import type { LangfuseObservation } from "@langfuse/tracing";
+import { tagRepairIteration } from "./langfuse";
 import { createDebugLog, finalizeDebugLog, getLatestDebugLog, getLatestFinalizedDebugLog } from "./debug-log";
 import {
   runAssetManifestTool,
@@ -39,7 +40,7 @@ import type {
   SceneDefinition,
   TimelineConfigInput,
 } from "./html5-render-schemas";
-import type { ConsistencyReport, LocalRepairDecision, NodeConsistencyCheckpoint, RepairPlan } from "./agent-consistency-schemas";
+import type { ConsistencyReport, LocalRepairDecision, NodeConsistencyCheckpoint, RepairPlan, RepairAttemptRecord, RepairPlanWithHistory } from "./agent-consistency-schemas";
 import type {
   AgentPlan,
   AssetManifest,
@@ -787,9 +788,13 @@ async function runLocalConsistencyLoop(
   executors: ToolExecutorMap,
   triggerTool: ToolName,
 ) {
-  const localRepairLimit = Math.max(1, Number(process.env.MAX_LOCAL_REPAIR_ITERATIONS || "8"));
+  const localRepairLimit = Math.max(1, Number(process.env.MAX_LOCAL_REPAIR_ITERATIONS || "4"));
   let localRepairCount = 0;
   let previousDecision: LocalRepairDecision | null = null;
+  const repairAttemptHistory: RepairAttemptRecord[] = [];
+  // Track consecutive no-progress rounds for early termination
+  let prevFailedEdgeSignature = "";
+  let noProgressStreak = 0;
   let edgesToCheck = discoverEdgesTriggeredByTool(triggerTool, getResolvedToolsFromState(state)).map((edge) => edge.edgeId);
 
   while (edgesToCheck.length > 0) {
@@ -865,6 +870,18 @@ async function runLocalConsistencyLoop(
       semanticReview.edges,
       `${TOOL_TITLE[triggerTool]} 完成后，Agent 对当前已具备条件的约束边做局部检查。`,
     );
+
+    // Back-fill the previous attempt's outcome now that we have the new consistency check
+    if (repairAttemptHistory.length > 0) {
+      const prevAttempt = repairAttemptHistory[repairAttemptHistory.length - 1];
+      if (prevAttempt.stillFailedEdges.length === 0) {
+        prevAttempt.stillFailedEdges = localReport.hardFailures.map((edge) => edge.edgeId);
+        prevAttempt.remainingIssues = localReport.hardFailures.flatMap((edge) => edge.issues).slice(0, 6);
+        prevAttempt.changeSummary = localReport.globalPass
+          ? "修复成功，所有边通过"
+          : `修复后仍有 ${localReport.hardFailures.length} 条边失败: ${localReport.hardFailures.map((e) => e.edgeId).join(", ")}`;
+      }
+    }
     state.consistencyReport = localReport;
     state.consistency = legacyConsistencyFromReport(localReport);
     state.consistencyCheckpoints.push({
@@ -893,6 +910,22 @@ async function runLocalConsistencyLoop(
       return;
     }
 
+    // No-progress early termination: if the exact same edges keep failing, stop early
+    const currentFailedEdgeSignature = localReport.hardFailures
+      .map((edge) => edge.edgeId)
+      .sort()
+      .join(",");
+    if (currentFailedEdgeSignature === prevFailedEdgeSignature) {
+      noProgressStreak += 1;
+    } else {
+      noProgressStreak = 0;
+      prevFailedEdgeSignature = currentFailedEdgeSignature;
+    }
+    if (noProgressStreak >= 2) {
+      console.warn(`${TOOL_TITLE[triggerTool]} 局部修复连续 ${noProgressStreak} 轮无进展（失败边不变: ${currentFailedEdgeSignature}），提前终止交由全局处理。`);
+      return;
+    }
+
     if (localRepairCount >= localRepairLimit) {
       console.warn(`${TOOL_TITLE[triggerTool]} 局部返修已达 ${localRepairLimit} 次，仍存在未通过边：${localReport.hardFailures.map((edge) => edge.edgeId).join(", ")}。将交由全局评估处理。`);
       return;
@@ -914,6 +947,7 @@ async function runLocalConsistencyLoop(
           langfuseParent: params.langfuseParent,
         },
         previousDecision,
+        repairAttemptHistory,
       );
     } catch (decisionError) {
       const msg = decisionError instanceof Error ? decisionError.message : String(decisionError);
@@ -932,7 +966,26 @@ async function runLocalConsistencyLoop(
       output: decision,
     });
 
-    const runnableSelectedTargets = sanitizeLocalRepairTargets(state, localReport, decision.selectedTargets);
+    let runnableSelectedTargets = sanitizeLocalRepairTargets(state, localReport, decision.selectedTargets);
+
+    // Multi-tool coalescing: when the same edges keep failing (noProgressStreak >= 1),
+    // force ALL involved tools from the stuck edges into the repair targets. This prevents
+    // the ping-pong pattern where two tools alternate without converging (e.g. system_scene).
+    if (noProgressStreak >= 1 && prevFailedEdgeSignature) {
+      const stuckEdgeIds = new Set(prevFailedEdgeSignature.split(","));
+      const allInvolvedTools = localReport.hardFailures
+        .filter((e) => stuckEdgeIds.has(e.edgeId))
+        .flatMap((e) => e.involvedTools);
+      const runnableSet = new Set(runnableSelectedTargets);
+      for (const tool of allInvolvedTools) {
+        if (!runnableSet.has(tool) && canRunTool(state, tool)) {
+          runnableSelectedTargets.push(tool);
+          runnableSet.add(tool);
+        }
+      }
+      runnableSelectedTargets = sortToolsByExecutionOrder(runnableSelectedTargets).slice(0, 4);
+      console.warn(`[runLocalConsistencyLoop] ${TOOL_TITLE[triggerTool]} 检测到修复乒乓，强制合并修复工具集: ${runnableSelectedTargets.join(", ")}`);
+    }
 
     previousDecision = {
       ...decision,
@@ -946,14 +999,50 @@ async function runLocalConsistencyLoop(
     }
 
     state.repairPlan = buildLocalRepairPlan({ ...decision, selectedTargets: runnableSelectedTargets }, localReport);
+
+    // Attach repair history to the plan so prompt builders can render it
+    const planWithHistory = state.repairPlan as RepairPlanWithHistory;
+    planWithHistory._repairAttemptHistory = [...repairAttemptHistory];
+    planWithHistory._currentAttempt = localRepairCount + 1;
+    planWithHistory._maxAttempts = localRepairLimit;
+
     emit(params, { type: "repair_plan", repairPlan: state.repairPlan });
     localRepairCount += 1;
     state.globalRepairCount += 1;
     state.iterationCount += 1;
 
+    // Snapshot which edges are targeted and what the goal is before executing
+    const targetEdgesBefore = state.repairPlan.recheckEdges.slice();
+    const repairGoalBefore = state.repairPlan.repairGoal;
+    const repairedTools: string[] = [];
+
     for (const repairTool of sortToolsByExecutionOrder(state.repairPlan.selectedTargets.map((item) => item.toolName))) {
       await executeTool(params, state, executors, repairTool);
+      repairedTools.push(repairTool);
     }
+
+    // Record this attempt for next iteration's repair memory
+    // (We'll fill stillFailedEdges + remainingIssues on the NEXT loop iteration's consistency check)
+    repairAttemptHistory.push({
+      attemptNumber: localRepairCount,
+      repairedTool: repairedTools.join(", "),
+      targetEdges: targetEdgesBefore,
+      repairGoal: repairGoalBefore,
+      stillFailedEdges: [], // filled after next consistency check
+      remainingIssues: [], // filled after next consistency check
+      changeSummary: `第${localRepairCount}次修复执行了工具: ${repairedTools.join(", ")}`,
+    });
+
+    // Tag repair iteration in Langfuse for observability
+    tagRepairIteration({
+      traceId: params.langfuseParent ? undefined : params.runId,
+      runId: params.runId,
+      sessionId: params.sessionId,
+      triggerTool,
+      localRepairCount,
+      failedEdges: targetEdgesBefore,
+      repairGoal: repairGoalBefore,
+    });
 
     edgesToCheck = Array.from(
       new Set([
