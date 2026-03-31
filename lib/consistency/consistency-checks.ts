@@ -300,8 +300,8 @@ export function checkGameplayEconomy(creativePack: CreativePack, targetGenre?: s
   const economyText = stringify(creativePack.economy);
   const tokenEntities = creativePack.gameplay.loopEntities.filter((entity) => entity.entityType === "resource_token");
   if (isManagementSimGenre(targetGenre)) {
-    if (!includesAny(gameplayText, ["订单", "经营", "扩建", "装扮"])) issues.push("Gameplay loop is missing order, management, expansion, or decoration signals.");
-    if (!includesAny(economyText, ["订单", "金币", "升级", "装扮"])) issues.push("Economy design is missing rewards, upgrade costs, or decoration unlocks.");
+    if (!includesAny(gameplayText, ["订单", "order", "需求", "委托", "经营", "管理", "运营", "扩建", "升级", "建造", "扩展", "装扮", "装饰", "布置", "美化"])) issues.push("Gameplay loop is missing order, management, expansion, or decoration signals.");
+    if (!includesAny(economyText, ["订单", "order", "需求", "金币", "货币", "币", "升级", "扩建", "装扮", "装饰"])) issues.push("Economy design is missing rewards, upgrade costs, or decoration unlocks.");
   }
   if (creativePack.economy.coreCurrencies.length < 2) issues.push("Core currency count is too small.");
   if (creativePack.economy.faucets.length < 3) issues.push("Economy faucets are incomplete.");
@@ -321,7 +321,7 @@ export function checkGameplayEconomy(creativePack: CreativePack, targetGenre?: s
       reason: "The order loop narrative does not yet prove how rewards, reinvestment, and stronger future orders connect.",
     });
   }
-  if (isManagementSimGenre(targetGenre) && (!creativePack.economy.orderCostLoop.includes("订单") || creativePack.economy.orderCostLoop.length < 24)) issues.push("Order cost loop description is incomplete.");
+  if (isManagementSimGenre(targetGenre) && (!includesAny(creativePack.economy.orderCostLoop, ["订单", "order", "需求", "委托", "报酬", "收益"]) || creativePack.economy.orderCostLoop.length < 24)) issues.push("Order cost loop description is incomplete.");
   if (!isManagementSimGenre(targetGenre) && creativePack.economy.orderCostLoop.length < 24) issues.push("Economy core loop description is too short.");
   const uncoveredTokens = tokenEntities.filter(
     (entity) =>
@@ -354,11 +354,11 @@ export function checkGameplaySystem(creativePack: CreativePack, targetGenre?: st
     creativePack.systems.systemToEntityMap.flatMap((item) => item.entityIds.map((entityId) => normalizeEntity(entityId))),
   );
   if (isManagementSimGenre(targetGenre)) {
-    if (!includesAny(stringify(creativePack.systems), ["经营", "任务", "活动"])) issues.push("System design is missing management, task, or event coverage.");
+    if (!includesAny(stringify(creativePack.systems), ["经营", "管理", "运营", "任务", "活动", "制作", "生产"])) issues.push("System design is missing management, task, or event coverage.");
   } else {
     if (!includesAny(stringify(creativePack.systems), ["任务", "活动", "技能", "战斗", "探索", "抽卡", "关卡"])) issues.push("System design is missing task, event, or core mechanic coverage.");
   }
-  if (includesAny(stringify(creativePack.gameplay), ["扩建"]) && !includesAny(stringify(creativePack.systems), ["扩建"])) issues.push("Gameplay emphasizes expansion but system design does not carry expansion.");
+  if (includesAny(stringify(creativePack.gameplay), ["扩建", "扩展", "升级", "建造"]) && !includesAny(stringify(creativePack.systems), ["扩建", "扩展", "升级", "建造", "建设"])) issues.push("Gameplay emphasizes expansion but system design does not carry expansion.");
   if (includesAny(stringify(creativePack.gameplay), ["角色", "互动", "陪伴"]) && !includesAny(creativePack.systems.roleInteractionSystem, ["角色", "互动", "对话", "气泡"])) {
     issues.push("Gameplay includes role interaction, but the system layer does not carry it.");
   }
@@ -377,10 +377,10 @@ export function checkGameplaySystem(creativePack: CreativePack, targetGenre?: st
   const buildingLikeCount = creativePack.systems.systemEntities.filter((entity) => entity.entityType === "building" || entity.entityType === "facility").length;
   const visitorLikeCount = creativePack.systems.systemEntities.filter((entity) => entity.entityType === "visitor" || entity.entityType === "character").length;
   const gameplayRoleLikeEntities = creativePack.gameplay.loopEntities.filter((entity) =>
-    ["visitor", "character"].includes(entity.entityType) || includesAny(stringify(entity), ["璁垮", "瑙掕壊", "灞呮皯", "椤惧", "闄即", "浜掑姩", "瀵硅瘽"]),
+    ["visitor", "character"].includes(entity.entityType) || includesAny(stringify(entity), ["访客", "角色", "居民", "顾客", "陪伴", "互动", "对话", "旅人", "NPC"]),
   );
   const gameplayBuildLikeEntities = creativePack.gameplay.loopEntities.filter((entity) =>
-    ["building", "facility"].includes(entity.entityType) || includesAny(stringify(entity), ["缁忚惀", "寤洪€?", "鎵╁缓", "搴楅摵", "璁炬柦"]),
+    ["building", "facility"].includes(entity.entityType) || includesAny(stringify(entity), ["经营", "建造", "扩建", "店铺", "设施", "升级", "营地"]),
   );
   evidence.push(
     `System entity type counts: building_or_facility=${buildingLikeCount}, visitor_or_character=${visitorLikeCount}, total=${creativePack.systems.systemEntities.length}`,
@@ -407,7 +407,7 @@ export function checkGameplaySystem(creativePack: CreativePack, targetGenre?: st
         .join("; ")}`,
     );
   }
-  if (includesAny(stringify(creativePack.gameplay), ["经营", "店", "建造", "扩建"]) && buildingLikeCount === 0) {
+  if (includesAny(stringify(creativePack.gameplay), ["经营", "店", "建造", "扩建", "升级", "营地", "设施"]) && buildingLikeCount === 0) {
     issues.push("System entities do not expose any building or facility carrier for the gameplay loop.");
     evidence.push("Missing carrier type: building/facility. Gameplay implies operation, build, or expansion, but the system layer exposes no matching scene-facing carrier.");
     evidence.push(
@@ -422,7 +422,7 @@ export function checkGameplaySystem(creativePack: CreativePack, targetGenre?: st
       reason: "Gameplay already expects build or management carriers, but the system layer does not define matching building or facility entities.",
     });
   }
-  if (includesAny(stringify(creativePack.gameplay), ["访客", "角色", "互动", "陪伴"]) && visitorLikeCount === 0) {
+  if (includesAny(stringify(creativePack.gameplay), ["访客", "角色", "互动", "陪伴", "旅人", "NPC"]) && visitorLikeCount === 0) {
     issues.push("System entities do not expose any visitor or role carrier for the gameplay loop.");
     evidence.push("Missing carrier type: visitor/character. Gameplay implies people-facing interaction, but the system layer exposes no stable visitor or character entity.");
     evidence.push(
@@ -550,8 +550,8 @@ export function checkSceneUi(creativePack: CreativePack) {
   const issues: string[] = [];
   const sceneText = stringify(creativePack.scene);
   const uiText = stringify(creativePack.ui);
-  if (includesAny(sceneText, ["订单"]) && creativePack.ui.orderPanel.length < 2) issues.push("Scene contains order carriers but UI order panel is incomplete.");
-  if (includesAny(sceneText, ["建造", "扩建"]) && creativePack.ui.buildModePanel.length < 2) issues.push("Scene contains build carriers but UI build mode panel is incomplete.");
+  if (includesAny(sceneText, ["订单", "order", "需求", "委托", "任务"]) && creativePack.ui.orderPanel.length < 2) issues.push("Scene contains order carriers but UI order panel is incomplete.");
+  if (includesAny(sceneText, ["建造", "扩建", "升级", "扩展"]) && creativePack.ui.buildModePanel.length < 2) issues.push("Scene contains build carriers but UI build mode panel is incomplete.");
   if (includesAny(sceneText, ["活动"]) && creativePack.ui.eventEntry.length < 2) issues.push("Scene contains event carriers but UI event entry is incomplete.");
   if (!includesAny(uiText, ["反馈", "飞字", "弹层", "提示"])) issues.push("UI layer lacks feedback carriers for scene actions.");
   return buildEdgeResult("scene_ui", issues.length === 0, issues.length > 1 ? "high" : "medium", issues, ["ui_architecture_tool", "scene_design_tool"], [creativePack.ui.buildModePanel.join(" / ")]);
