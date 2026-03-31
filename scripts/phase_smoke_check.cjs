@@ -29,19 +29,19 @@ const {
 } = require(path.join(projectRoot, "lib", "consistency-graph.ts"));
 
 const brief = {
-  projectCode: "Project Harbor",
+  projectCode: "星野营地",
   targetGenre: "模拟经营",
   targetPlatform: "多端",
   targetMarket: "中国大陆",
-  audiencePositioning: "偏女性向与泛休闲用户，偏好低压力经营、装扮与持续回访。",
-  coreFantasy: "把旧港小镇经营成有烟火气和节庆氛围的度假据点。",
+  audiencePositioning: "面向喜爱户外露营、自然治愈和轻度社交互动的休闲玩家，偏好短时长回合和季节收集驱动的复访节奏。",
+  coreFantasy: "在山间星空下经营一座野营地，搭建帐篷、篝火料理、星象观测，把荒野山谷打造成旅人向往的治愈目的地。",
   monetizationModel: "内购",
-  benchmarkGames: "动物餐厅、梦幻家园、开罗经营系列",
-  requiredSystems: "经营循环、区域扩建、订单目标、装扮收集、角色互动、活动包装",
-  versionGoal: "验证首日经营循环、订单驱动、扩建反馈、装扮收集和活动包装是否成立。",
+  benchmarkGames: "小森生活、Cozy Grove、以露营和自然探索为核心的休闲经营产品",
+  requiredSystems: "营地经营循环、设施搭建与升级、旅人接待与任务、装备与食谱收集、季节活动包装、角色交互",
+  versionGoal: "验证首日营地经营循环、旅人接待驱动、设施升级反馈、装备食谱收集和季节活动包装是否成立。",
   projectStage: "小范围测试",
   productionConstraints:
-    "本轮只做小范围测试版本，不接重3D资源，不做复杂剧情分支，剧情与角色主要用于活动包装与互动反馈。",
+    "本轮只做小范围测试版本，不接重3D资源，不做复杂剧情分支，剧情与角色主要用于季节活动包装与互动反馈。",
 };
 
 const proposal = {

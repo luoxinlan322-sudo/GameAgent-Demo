@@ -11,23 +11,23 @@ type PersonaFormProps = {
 };
 
 const simulationPreset: PersonaInput = {
-  projectCode: "\u6e2f\u9547\u8ba1\u5212",
-  targetGenre: "\u6a21\u62df\u7ecf\u8425",
-  targetPlatform: "\u591a\u7aef",
-  targetMarket: "\u4e2d\u56fd\u5927\u9646",
+  projectCode: "星野营地",
+  targetGenre: "模拟经营",
+  targetPlatform: "多端",
+  targetMarket: "中国大陆",
   audiencePositioning:
-    "\u9762\u5411\u504f\u7231\u4f4e\u538b\u529b\u4f11\u95f2\u7ecf\u8425\u3001\u88c5\u626e\u6536\u96c6\u548c\u77ed\u65f6\u957f\u56de\u6d41\u7684\u73a9\u5bb6\uff0c\u5e0c\u671b\u6709\u7a33\u5b9a\u7684\u590d\u8bbf\u52a8\u673a\u3002",
+    "面向喜爱户外露营、自然治愈和轻度社交互动的休闲玩家，偏好短时长回合和季节收集驱动的复访节奏。",
   coreFantasy:
-    "\u901a\u8fc7\u5e97\u94fa\u5347\u7ea7\u3001\u5c45\u6c11\u4ea4\u4e92\u548c\u8857\u533a\u66f4\u65b0\uff0c\u628a\u8001\u6e2f\u9547\u91cd\u5efa\u6210\u6e29\u6696\u53c8\u6709\u98ce\u683c\u7684\u5ea6\u5047\u76ee\u7684\u5730\u3002",
-  monetizationModel: "\u5185\u8d2d",
-  benchmarkGames: "\u300a\u52a8\u7269\u9910\u5385\u300b\uff0c\u5f00\u7f57\u7cfb\u7ecf\u8425\u6a21\u62df\uff0c\u4ee5\u88c5\u626e\u4e0e\u5bb6\u56ed\u4e3a\u6838\u5fc3\u7684\u4f11\u95f2\u7ecf\u8425\u4ea7\u54c1",
+    "在山间星空下经营一座野营地，搭建帐篷、篝火料理、星象观测，把荒野山谷打造成旅人向往的治愈目的地。",
+  monetizationModel: "内购",
+  benchmarkGames: "《小森生活》，《Cozy Grove》，以露营和自然探索为核心的休闲经营产品",
   requiredSystems:
-    "\u6838\u5fc3\u7ecf\u8425\u5faa\u73af\uff0c\u8857\u533a\u6269\u5efa\uff0c\u8ba2\u5355\u4e0e\u76ee\u6807\uff0c\u88c5\u626e\u6536\u96c6\uff0c\u89d2\u8272\u4ea4\u4e92\uff0c\u6d3b\u52a8\u5305\u88c5",
+    "营地经营循环，设施搭建与升级，旅人接待与任务，装备与食谱收集，季节活动包装，角色交互",
   versionGoal:
-    "\u4ea7\u51fa\u4e00\u5957\u8303\u56f4\u53ef\u63a7\u4f46\u5185\u5bb9\u5b8c\u6574\u7684\u9996\u65e5\u7ecf\u8425\u539f\u578b\u5305\uff0c\u8986\u76d6\u8ba2\u5355\u52a8\u673a\u3001\u88c5\u626e\u6536\u96c6\u3001\u89d2\u8272\u4ea4\u4e92\u3001\u6d3b\u52a8\u5305\u88c5\u548c HTML5 \u8fd0\u884c\u65f6\u88c5\u914d\u3002",
-  projectStage: "\u5c0f\u8303\u56f4\u6d4b\u8bd5",
+    "产出一套范围可控但内容完整的首日营地经营原型包，覆盖旅人接待、篝火料理、设施升级、季节活动和 HTML5 运行时装配。",
+  projectStage: "小范围测试",
   productionConstraints:
-    "\u4fdd\u6301\u539f\u578b\u8303\u56f4\u53ef\u63a7\uff0c\u4f46\u4e0d\u80fd\u6f0f\u6389\u8fd0\u884c\u65f6\u627f\u8f7d\u7269\u3002\u9700\u8981\u8986\u76d6\u7ecf\u8425\u5faa\u73af\u3001\u6269\u5efa\u53cd\u9988\u3001\u88c5\u626e\u6536\u96c6\u3001\u89d2\u8272\u4ea4\u4e92\u3001\u6d3b\u52a8\u5305\u88c5\uff0c\u4ee5\u53ca HTML5 \u88c5\u914d\u6240\u9700\u7684\u573a\u666f\u3001UI\u3001\u8d44\u4ea7\u548c\u6587\u6848\u3002\u4e0d\u63a5\u5165\u91cd 3D \u8d44\u6e90\uff0c\u4e0d\u505a\u7ade\u6280\u5bf9\u6297\u7cfb\u7edf\u3002",
+    "保持原型范围可控，但不能漏掉运行时承载物。需要覆盖营地经营循环、设施搭建反馈、装备食谱收集、角色交互、季节活动包装，以及 HTML5 装配所需的场景、UI、资产和文案。不接入重 3D 资源，不做竞技对抗系统。",
 };
 
 const platformOptions: PersonaInput["targetPlatform"][] = ["iOS", "Android", "\u591a\u7aef"];
@@ -49,7 +49,7 @@ export function PersonaForm({ persona, isRunning, onChange, onPreset, onSubmit }
       <div className="field">
         <label htmlFor="simulationPreset">当前测试案例</label>
         <button id="simulationPreset" className="button button-secondary" type="button" onClick={() => onPreset(simulationPreset)}>
-          \u6a21\u62df\u7ecf\u8425 / \u5c0f\u8303\u56f4\u6d4b\u8bd5
+          星野营地 / 小范围测试
         </button>
       </div>
 
@@ -131,7 +131,7 @@ export function PersonaForm({ persona, isRunning, onChange, onPreset, onSubmit }
           id="coreFantasy"
           value={persona.coreFantasy}
           onChange={(event) => updateField(persona, "coreFantasy", event.target.value, onChange)}
-          placeholder="\u4f8b\uff1a\u901a\u8fc7\u5347\u7ea7\u548c\u8857\u533a\u66f4\u65b0\uff0c\u628a\u8001\u6e2f\u9547\u91cd\u5efa\u6210\u6e29\u6696\u53c8\u6709\u98ce\u683c\u7684\u5ea6\u5047\u5730\u3002"
+          placeholder="例：在山间星空下搭帐篷、篝火料理，把荒野营地打造成旅人向往的治愈目的地。"
         />
       </div>
 

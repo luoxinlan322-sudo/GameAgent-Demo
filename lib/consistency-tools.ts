@@ -120,7 +120,7 @@ async function runSchemaTool<T>(params: {
       schemaName: params.schemaName,
       stage: params.stage,
       messages: [{ role: "user", content: params.prompt }],
-      extraBody: getProviderExtraBody(),
+      extraBody: getProviderExtraBody(params.stage),
       requestPayload: params.requestPayload,
       debugMeta: params.debugMeta,
       timeoutMs: params.timeoutMs ?? Number(process.env.LLM_TIMEOUT_MS || "600000"),
@@ -218,6 +218,15 @@ function buildRepairFallbackFromReport(consistencyReport: ConsistencyReport): Re
     repairInstructions: "围绕失败边做局部返修，优先修复影响范围最大的上游工具，不要全量重跑。",
     repairTools: selectedTargets.map((item) => item.toolName).slice(0, 8),
     expectedImprovements: stopConditions,
+    failedEdgeDetails: consistencyReport.hardFailures.slice(0, 16).map((edge) => {
+      const task = consistencyReport.repairTasks.find((t) => t.edgeId === edge.edgeId);
+      return {
+        edgeId: edge.edgeId,
+        issues: edge.issues.slice(0, 6),
+        strictIdentifiers: task?.strictIdentifiers?.slice(0, 8) ?? [],
+        repairSuggestions: edge.repairSuggestions?.slice(0, 4) ?? [],
+      };
+    }),
   }, consistencyReport);
 }
 

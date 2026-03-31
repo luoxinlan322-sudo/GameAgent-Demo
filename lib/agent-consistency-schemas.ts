@@ -61,15 +61,23 @@ export const RepairTargetPlanSchema = z.object({
   relatedTaskEdges: z.array(ConsistencyEdgeIdSchema).min(1).max(8),
 });
 
+export const FailedEdgeDetailSchema = z.object({
+  edgeId: ConsistencyEdgeIdSchema,
+  issues: z.array(z.string().max(400)).max(6),
+  strictIdentifiers: z.array(z.string().max(120)).max(8).default([]),
+  repairSuggestions: z.array(z.string().max(400)).max(4).default([]),
+});
+
 export const RepairPlanSchema = z.object({
   rationale: z.string().min(12).max(400),
   selectedTargets: z.array(RepairTargetPlanSchema).min(1).max(4),
   stopConditions: z.array(z.string().min(6).max(180)).min(1).max(6),
   recheckEdges: z.array(ConsistencyEdgeIdSchema).min(1).max(16),
   repairGoal: z.string().min(8).max(400).default("Complete the current consistency repair round."),
-  repairInstructions: z.string().min(8).max(400).default("Focus repair on failed edges and prove the issue is resolved during recheck."),
+  repairInstructions: z.string().min(8).max(2000).default("Focus repair on failed edges and prove the issue is resolved during recheck."),
   repairTools: z.array(ToolNameSchema).max(8).default([]),
   expectedImprovements: z.array(z.string().min(4).max(180)).max(12).default([]),
+  failedEdgeDetails: z.array(FailedEdgeDetailSchema).max(16).default([]),
 });
 
 export const NodeConsistencyCheckpointSchema = z.object({
@@ -107,4 +115,5 @@ export type RepairPlan = z.infer<typeof RepairPlanSchema>;
 export type NodeConsistencyCheckpoint = z.infer<typeof NodeConsistencyCheckpointSchema>;
 export type LocalRepairDecision = z.infer<typeof LocalRepairDecisionSchema>;
 export type ConsistencySemanticReview = z.infer<typeof ConsistencySemanticReviewSchema>;
+export type FailedEdgeDetail = z.infer<typeof FailedEdgeDetailSchema>;
 export type ProblemLocationHint = z.infer<typeof ProblemLocationHintSchema>;

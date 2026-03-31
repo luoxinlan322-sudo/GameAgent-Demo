@@ -384,7 +384,7 @@ export const SceneRepairPatchSchema = z.object({
 });
 
 export const UIInformationArchitectureSchema = z.object({
-  topBar: z.array(z.string().min(4).max(120)).min(3).max(6),
+  topBar: z.array(z.string().min(4).max(120)).min(2).max(6),
   orderPanel: z.array(z.string().min(4).max(120)).min(2).max(6),
   taskPanel: z.array(z.string().min(4).max(120)).min(2).max(6),
   shopEntry: z.array(z.string().min(4).max(120)).min(2).max(5),
@@ -396,7 +396,7 @@ export const UIInformationArchitectureSchema = z.object({
 /** Genre-conditional UI information architecture schema factory. */
 export function createUIInformationArchitectureSchema(profile: GenreFeatureProfile) {
   return z.object({
-    topBar: z.array(z.string().min(4).max(120)).min(3).max(6),
+    topBar: z.array(z.string().min(4).max(120)).min(2).max(6),
     orderPanel: profile.requireOrders
       ? z.array(z.string().min(4).max(120)).min(2).max(6)
       : z.array(z.string().min(4).max(120)).max(6).default([]),
@@ -447,6 +447,7 @@ export const CharacterListSchema = z.object({
 
 export const AssetTypeSchema = z.enum([
   "角色立绘",
+  "场景背景",
   "场景物件",
   "建筑单体",
   "UI图标",

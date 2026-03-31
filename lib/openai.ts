@@ -20,14 +20,33 @@ export function getBaseURL() {
   return process.env.OPENAI_BASE_URL;
 }
 
-export function getProviderExtraBody() {
+/**
+ * Returns provider-specific extra_body for the OpenAI-compatible API.
+ *
+ * When `LLM_PROVIDER=qwen` and `QWEN_ENABLE_THINKING=true`:
+ *   - If `QWEN_THINKING_STAGES` is unset or `*`, all stages get thinking.
+ *   - Otherwise only the comma-separated stage names listed get thinking enabled.
+ *
+ * @param stage  Optional stage name used to decide per-stage thinking.
+ */
+export function getProviderExtraBody(stage?: string) {
   const provider = (process.env.LLM_PROVIDER || "").toLowerCase();
-  const disableThinking = (process.env.QWEN_ENABLE_THINKING || "false").toLowerCase() !== "true";
+  const thinkingEnabled = (process.env.QWEN_ENABLE_THINKING || "false").toLowerCase() === "true";
 
   if (provider === "qwen") {
-    return {
-      enable_thinking: !disableThinking ? true : false,
-    };
+    let enableThinking = false;
+
+    if (thinkingEnabled) {
+      const stagesRaw = (process.env.QWEN_THINKING_STAGES || "*").trim();
+      if (stagesRaw === "*" || !stage) {
+        enableThinking = true;
+      } else {
+        const allowedStages = new Set(stagesRaw.split(",").map((s) => s.trim()).filter(Boolean));
+        enableThinking = allowedStages.has(stage);
+      }
+    }
+
+    return { enable_thinking: enableThinking };
   }
 
   return undefined;

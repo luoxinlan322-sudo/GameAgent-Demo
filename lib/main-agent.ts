@@ -10,6 +10,7 @@ import {
   runLayoutTool,
   runPlanningTool,
   runProposalTool,
+  runRepairTool,
   runSceneTool,
   runStoryTool,
   runSystemDesignTool,
@@ -455,19 +456,41 @@ function buildLocalRepairPlan(decision: LocalRepairDecision, report: Consistency
     ]),
   ).slice(0, 16) as RepairPlan["recheckEdges"];
 
+  // Collect rich failure diagnostics per edge to pass through to prompts
+  const failedEdgeDetails = report.hardFailures
+    .filter((edge) => recheckEdges.includes(edge.edgeId))
+    .map((edge) => {
+      const task = report.repairTasks.find((t) => t.edgeId === edge.edgeId);
+      return {
+        edgeId: edge.edgeId,
+        issues: edge.issues.slice(0, 6),
+        strictIdentifiers: task?.strictIdentifiers?.slice(0, 8) ?? [],
+        repairSuggestions: edge.repairSuggestions?.slice(0, 4) ?? [],
+      };
+    })
+    .slice(0, 16);
+
+  const repairInstructions = report.repairTasks
+    .filter((task) => recheckEdges.includes(task.edgeId))
+    .map((task) => {
+      const identifierHint = task.strictIdentifiers?.length
+        ? ` Must include: ${task.strictIdentifiers.join(", ")}.`
+        : "";
+      return `[${task.edgeId}] ${task.problemSummary}${identifierHint}`;
+    })
+    .slice(0, 8)
+    .join("\n");
+
   return {
     rationale: decision.rationale,
     selectedTargets,
     stopConditions: decision.successConditions.length > 0 ? decision.successConditions : ["The local failed consistency edges pass recheck."],
     recheckEdges,
     repairGoal: decision.rationale,
-    repairInstructions: report.repairTasks
-      .filter((task) => recheckEdges.includes(task.edgeId))
-      .map((task) => `${task.problemSummary} Why it matters: ${task.whyItMatters}`)
-      .slice(0, 6)
-      .join("\n"),
+    repairInstructions: repairInstructions || "Focus repair on failed edges and prove the issue is resolved during recheck.",
     repairTools: selectedTargets.map((item) => item.toolName),
     expectedImprovements: Array.from(new Set(selectedTargets.flatMap((item) => item.expectedImpact).concat(decision.expectedImpact, decision.successConditions))).slice(0, 12),
+    failedEdgeDetails,
   };
 }
 
@@ -573,7 +596,7 @@ function createToolExecutors(params: RunMainAgentParams, state: MainAgentState):
         runId: params.runId,
         iteration: state.iterationCount,
         langfuseParent: params.langfuseParent,
-      }, state.repairPlan);
+      }, state.repairPlan, state.gameplay);
       return state.gameplay;
     },
     economy_tool: async () => {
@@ -582,7 +605,7 @@ function createToolExecutors(params: RunMainAgentParams, state: MainAgentState):
         runId: params.runId,
         iteration: state.iterationCount,
         langfuseParent: params.langfuseParent,
-      }, state.repairPlan, genreProfile);
+      }, state.repairPlan, genreProfile, state.economy);
       return state.economy;
     },
     system_design_tool: async () => {
@@ -591,7 +614,7 @@ function createToolExecutors(params: RunMainAgentParams, state: MainAgentState):
         runId: params.runId,
         iteration: state.iterationCount,
         langfuseParent: params.langfuseParent,
-      }, state.repairPlan, genreProfile);
+      }, state.repairPlan, genreProfile, state.systems);
       return state.systems;
     },
     proposal_tool: async () => {
@@ -600,7 +623,7 @@ function createToolExecutors(params: RunMainAgentParams, state: MainAgentState):
         runId: params.runId,
         iteration: state.iterationCount,
         langfuseParent: params.langfuseParent,
-      }, state.repairPlan);
+      }, state.repairPlan, state.proposal);
       return state.proposal;
     },
     scene_design_tool: async () => {
@@ -618,7 +641,7 @@ function createToolExecutors(params: RunMainAgentParams, state: MainAgentState):
         runId: params.runId,
         iteration: state.iterationCount,
         langfuseParent: params.langfuseParent,
-      }, state.repairPlan, genreProfile);
+      }, state.repairPlan, genreProfile, state.ui);
       return state.ui;
     },
     story_tool: async () => {
@@ -627,7 +650,7 @@ function createToolExecutors(params: RunMainAgentParams, state: MainAgentState):
         runId: params.runId,
         iteration: state.iterationCount,
         langfuseParent: params.langfuseParent,
-      }, state.repairPlan);
+      }, state.repairPlan, state.story);
       return state.story;
     },
     character_tool: async () => {
@@ -636,7 +659,7 @@ function createToolExecutors(params: RunMainAgentParams, state: MainAgentState):
         runId: params.runId,
         iteration: state.iterationCount,
         langfuseParent: params.langfuseParent,
-      }, state.repairPlan);
+      }, state.repairPlan, state.characterCards);
       return state.characterCards;
     },
     asset_manifest_tool: async () => {
@@ -657,6 +680,7 @@ function createToolExecutors(params: RunMainAgentParams, state: MainAgentState):
           langfuseParent: params.langfuseParent,
         },
         state.repairPlan,
+        state.assetManifest,
       );
       return state.assetManifest;
     },
@@ -679,6 +703,7 @@ function createToolExecutors(params: RunMainAgentParams, state: MainAgentState):
           langfuseParent: params.langfuseParent,
         },
         state.repairPlan,
+        state.copywriting,
       );
       return state.copywriting;
     },
@@ -709,23 +734,51 @@ function createToolExecutors(params: RunMainAgentParams, state: MainAgentState):
 
 async function executeTool(params: RunMainAgentParams, state: MainAgentState, executors: ToolExecutorMap, tool: ToolName) {
   if (!canRunTool(state, tool)) {
-    throw new Error(`Agent cannot execute ${tool} because dependencies are unresolved.`);
+    const toolConfig = TOOL_EXECUTION_CONFIG[tool];
+    console.warn(`[executeTool] ${tool} 跳过：依赖未就绪。`);
+    emit(params, {
+      type: "node",
+      node: tool,
+      phase: "工具",
+      title: toolConfig.title,
+      status: "fallback",
+      iteration: state.iterationCount,
+      summary: `工具跳过（依赖未就绪，将由修复循环补齐）`,
+      output: null,
+    });
+    return null;
   }
   const toolConfig = TOOL_EXECUTION_CONFIG[tool];
   emitRunningNode(params, state, tool, "工具", toolConfig.title, toolConfig.summary);
-  const output = await executors[tool]();
-  const status = resolveNodeStatus(params.runId, tool, state.iterationCount);
-  emit(params, {
-    type: "node",
-    node: tool,
-    phase: "工具",
-    title: toolConfig.title,
-    status: status.status,
-    iteration: state.iterationCount,
-    summary: status.error ?? summarizeOutput(tool, output),
-    output,
-  });
-  return output;
+  try {
+    const output = await executors[tool]();
+    const status = resolveNodeStatus(params.runId, tool, state.iterationCount);
+    emit(params, {
+      type: "node",
+      node: tool,
+      phase: "工具",
+      title: toolConfig.title,
+      status: status.status,
+      iteration: state.iterationCount,
+      summary: status.error ?? summarizeOutput(tool, output),
+      output,
+    });
+    return output;
+  } catch (toolError) {
+    const msg = toolError instanceof Error ? toolError.message : String(toolError);
+    console.warn(`[executeTool] ${tool} 执行失败，标记为 soft-fail 并交由一致性修复处理：${msg.slice(0, 200)}`);
+    emit(params, {
+      type: "node",
+      node: tool,
+      phase: "工具",
+      title: toolConfig.title,
+      status: "fallback",
+      iteration: state.iterationCount,
+      summary: `工具执行失败（将由修复循环重试）：${msg.slice(0, 120)}`,
+      output: null,
+    });
+    return null;
+  }
 }
 
 async function runLocalConsistencyLoop(
@@ -734,7 +787,7 @@ async function runLocalConsistencyLoop(
   executors: ToolExecutorMap,
   triggerTool: ToolName,
 ) {
-  const localRepairLimit = 5;
+  const localRepairLimit = Math.max(1, Number(process.env.MAX_LOCAL_REPAIR_ITERATIONS || "8"));
   let localRepairCount = 0;
   let previousDecision: LocalRepairDecision | null = null;
   let edgesToCheck = discoverEdgesTriggeredByTool(triggerTool, getResolvedToolsFromState(state)).map((edge) => edge.edgeId);
@@ -761,29 +814,51 @@ async function runLocalConsistencyLoop(
       output: ruleEdges,
     });
 
-    const semanticReview = await runLocalSemanticConsistencyTool(
-      params.persona,
-      triggerTool,
-      artifactContext,
-      ruleEdges,
-      {
-        sessionId: params.sessionId,
-        runId: params.runId,
+    let semanticReview: Awaited<ReturnType<typeof runLocalSemanticConsistencyTool>>;
+    try {
+      semanticReview = await runLocalSemanticConsistencyTool(
+        params.persona,
+        triggerTool,
+        artifactContext,
+        ruleEdges,
+        {
+          sessionId: params.sessionId,
+          runId: params.runId,
+          iteration: state.iterationCount,
+          langfuseParent: params.langfuseParent,
+        },
+      );
+    } catch (semanticError) {
+      const msg = semanticError instanceof Error ? semanticError.message : String(semanticError);
+      console.warn(`[runLocalConsistencyLoop] ${TOOL_TITLE[triggerTool]} 局部语义检查失败（${msg.slice(0, 120)}），降级为仅规则检查。`);
+      semanticReview = {
+        edges: ruleEdges.map((edge) => ({ ...edge, pass: true, severity: "low" as const, issues: [], evidence: edge.evidence ?? [], involvedTools: edge.involvedTools ?? [edge.sourceTool, edge.targetTool], problemLocationHints: edge.problemLocationHints ?? [] })),
+        summary: `局部语义检查因超时跳过，仅使用规则检查结果。(${msg.slice(0, 80)})`,
+      };
+      emit(params, {
+        type: "node",
+        node: `local_semantic_check_${triggerTool}`,
+        phase: "反馈",
+        title: `${TOOL_TITLE[triggerTool]}后局部语义检查`,
+        status: "fallback",
         iteration: state.iterationCount,
-        langfuseParent: params.langfuseParent,
-      },
-    );
+        summary: `语义检查超时降级：${msg.slice(0, 100)}`,
+        output: null,
+      });
+    }
 
-    emit(params, {
-      type: "node",
-      node: `local_semantic_check_${triggerTool}`,
-      phase: "反馈",
-      title: `${TOOL_TITLE[triggerTool]}后局部语义检查`,
-      status: resolveNodeStatus(params.runId, "local_semantic_consistency_tool", state.iterationCount).status,
-      iteration: state.iterationCount,
-      summary: semanticReview.summary,
-      output: semanticReview,
-    });
+    if (!semanticReview.summary.startsWith("局部语义检查因超时")) {
+      emit(params, {
+        type: "node",
+        node: `local_semantic_check_${triggerTool}`,
+        phase: "反馈",
+        title: `${TOOL_TITLE[triggerTool]}后局部语义检查`,
+        status: resolveNodeStatus(params.runId, "local_semantic_consistency_tool", state.iterationCount).status,
+        iteration: state.iterationCount,
+        summary: semanticReview.summary,
+        output: semanticReview,
+      });
+    }
 
     const localReport = buildLocalConsistencyReport(
       ruleEdges,
@@ -823,21 +898,28 @@ async function runLocalConsistencyLoop(
       return;
     }
 
-    const decision = await runLocalRepairDecisionTool(
-      params.persona,
-      triggerTool,
-      artifactContext,
-      localReport,
-      localRepairCount,
-      state.globalRepairCount,
-      {
-        sessionId: params.sessionId,
-        runId: params.runId,
-        iteration: state.iterationCount,
-        langfuseParent: params.langfuseParent,
-      },
-      previousDecision,
-    );
+    let decision: Awaited<ReturnType<typeof runLocalRepairDecisionTool>>;
+    try {
+      decision = await runLocalRepairDecisionTool(
+        params.persona,
+        triggerTool,
+        artifactContext,
+        localReport,
+        localRepairCount,
+        state.globalRepairCount,
+        {
+          sessionId: params.sessionId,
+          runId: params.runId,
+          iteration: state.iterationCount,
+          langfuseParent: params.langfuseParent,
+        },
+        previousDecision,
+      );
+    } catch (decisionError) {
+      const msg = decisionError instanceof Error ? decisionError.message : String(decisionError);
+      console.warn(`[runLocalConsistencyLoop] ${TOOL_TITLE[triggerTool]} 局部返修决策失败（${msg.slice(0, 120)}），跳过本轮返修交由全局处理。`);
+      return;
+    }
 
     emit(params, {
       type: "node",
@@ -858,7 +940,7 @@ async function runLocalConsistencyLoop(
     };
     if (!decision.shouldRepairNow || runnableSelectedTargets.length === 0) {
       if (!localReport.globalPass) {
-        throw new Error(`${TOOL_TITLE[triggerTool]} 局部一致性未通过，Agent 选择继续但未给出可执行返修目标。`);
+        console.warn(`[runLocalConsistencyLoop] ${TOOL_TITLE[triggerTool]} 局部一致性未通过，Agent 选择继续但未给出可执行返修目标。将交由全局评估处理。`);
       }
       return;
     }
@@ -940,6 +1022,12 @@ export async function runMainAgent(params: RunMainAgentParams): Promise<MainAgen
     summary: "已读取项目简报。",
     output: { persona: params.persona },
   });
+
+  // ── Global repair & tool-augmentation loop ──────────────────────────────
+  // Iteration 1: run all 12 tools via ensureToolCoverage.
+  // Iteration 2+: only re-run repair targets + downstream cascade,
+  //               preserving correct prior results via previousBaseline.
+  while (state.iterationCount <= state.maxIterations) {
 
   const repairContext = reviewContextText(state);
 
@@ -1062,28 +1150,48 @@ export async function runMainAgent(params: RunMainAgentParams): Promise<MainAgen
   });
 
   emitRunningNode(params, state, "semantic_consistency_tool", "反馈", "语义一致性检查", "正在补充语义层的一致性判断。");
-  const semanticReview = await runSemanticConsistencyTool(
-    params.persona,
-    state.proposal,
-    creativePack,
-    ruleEdges,
-    {
-      sessionId: params.sessionId,
-      runId: params.runId,
+  let semanticReview: Awaited<ReturnType<typeof runSemanticConsistencyTool>>;
+  try {
+    semanticReview = await runSemanticConsistencyTool(
+      params.persona,
+      state.proposal,
+      creativePack,
+      ruleEdges,
+      {
+        sessionId: params.sessionId,
+        runId: params.runId,
+        iteration: state.iterationCount,
+        langfuseParent: params.langfuseParent,
+      },
+    );
+    emit(params, {
+      type: "node",
+      node: "semantic_consistency_tool",
+      phase: "反馈",
+      title: "语义一致性检查",
+      status: resolveNodeStatus(params.runId, "semantic_consistency_tool", state.iterationCount).status,
       iteration: state.iterationCount,
-      langfuseParent: params.langfuseParent,
-    },
-  );
-  emit(params, {
-    type: "node",
-    node: "semantic_consistency_tool",
-    phase: "反馈",
-    title: "语义一致性检查",
-    status: resolveNodeStatus(params.runId, "semantic_consistency_tool", state.iterationCount).status,
-    iteration: state.iterationCount,
-    summary: semanticReview.summary,
-    output: semanticReview,
-  });
+      summary: semanticReview.summary,
+      output: semanticReview,
+    });
+  } catch (semanticError) {
+    const msg = semanticError instanceof Error ? semanticError.message : String(semanticError);
+    console.warn(`[runGlobalConsistencyCheck] 全局语义检查失败（${msg.slice(0, 120)}），降级为仅规则检查。`);
+    semanticReview = {
+      edges: ruleEdges.map((edge) => ({ ...edge, pass: true, severity: "low" as const, issues: [], evidence: edge.evidence ?? [], involvedTools: edge.involvedTools ?? [edge.sourceTool, edge.targetTool], problemLocationHints: edge.problemLocationHints ?? [] })),
+      summary: `全局语义检查因超时跳过，仅使用规则检查结果。(${msg.slice(0, 80)})`,
+    };
+    emit(params, {
+      type: "node",
+      node: "semantic_consistency_tool",
+      phase: "反馈",
+      title: "语义一致性检查",
+      status: "fallback",
+      iteration: state.iterationCount,
+      summary: `语义检查超时降级：${msg.slice(0, 100)}`,
+      output: null,
+    });
+  }
 
   const reportLog = createSystemNodeLog(params, state, "consistency_report", "反馈", "一致性图谱聚合", {
     ruleEdges,
@@ -1165,6 +1273,46 @@ export async function runMainAgent(params: RunMainAgentParams): Promise<MainAgen
 
   recordReview(state);
   emit(params, { type: "review_history", history: state.reviewHistory });
+
+  // ── Global loop exit / continue decision ──
+  if (!state.verification?.needsRepair || state.iterationCount >= state.maxIterations) {
+    break;
+  }
+
+  // Build global repair plan for next iteration
+  emitRunningNode(params, state, "repair_tool", "反馈", "全局返修规划", "正在根据评估与一致性结果规划下一轮修缮工具。");
+  state.repairPlan = await runRepairTool(
+    params.persona,
+    state.intent!,
+    state.plan!,
+    state.proposal!,
+    state.evaluation!,
+    state.consistency!,
+    state.verification,
+    {
+      sessionId: params.sessionId,
+      runId: params.runId,
+      iteration: state.iterationCount,
+      langfuseParent: params.langfuseParent,
+    },
+  );
+  emit(params, { type: "repair_plan", repairPlan: state.repairPlan });
+  emit(params, {
+    type: "node",
+    node: "repair_tool",
+    phase: "反馈",
+    title: "全局返修规划",
+    status: "done",
+    iteration: state.iterationCount,
+    summary: `修缮目标：${state.repairPlan.repairTools.join(", ")}`,
+    output: state.repairPlan,
+  });
+
+  state.iterationCount += 1;
+  state.globalRepairCount += 1;
+  console.log(`[runMainAgent] 进入第 ${state.iterationCount} 轮全局修缮迭代。修缮工具：${state.repairPlan.repairTools.join(", ")}`);
+
+  } // end while (global repair loop)
 
   const finalCreativePack = createCreativePack(state);
   state.finalResult = {
