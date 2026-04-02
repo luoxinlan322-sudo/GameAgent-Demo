@@ -110,10 +110,13 @@ export function repairContextBlock(repairContext?: string) {
 ${repairContext || "First round. No repair context yet."}`;
 }
 
-export function previousOutputBlock(baseline: unknown) {
+export function previousOutputBlock(baseline: unknown, iteration?: number) {
   if (!baseline) return "";
   const json = JSON.stringify(baseline, null, 2);
-  const limit = 8000;
+  // Progressive compression: shrink baseline context as repair iterations grow
+  const limit = iteration && iteration >= 4 ? 3000
+    : iteration && iteration >= 3 ? 5000
+    : 8000;
   let truncated: string;
   if (json.length > limit) {
     // Smart truncation: preserve tail (often contains assetLabels, characterCardCopy etc.)

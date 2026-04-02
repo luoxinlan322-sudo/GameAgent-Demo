@@ -2,7 +2,7 @@ import { startObservation } from "@langfuse/tracing";
 import { ZodError } from "zod";
 import type { Html5PreparationPackage } from "@/lib/html5-render-schemas";
 import { createLangfuseScores, flushLangfuse, isLangfuseEnabled, type AgentRuntimeMetrics } from "@/lib/langfuse";
-import { runMainAgent } from "@/lib/main-agent";
+import { runMainAgent, type MainAgentState } from "@/lib/main-agent";
 import type { ConsistencyReport } from "@/lib/agent-consistency-schemas";
 import { ProjectBriefSchema, type AgentPlan, type CreativePack, type Evaluation, type GameProposal, type PersonaInput, type ReviewHistoryItem } from "@/lib/schemas";
 import { createRunId, createSessionId, upsertRun, type StageTrace } from "@/lib/run-store";
@@ -207,7 +207,9 @@ export async function POST(request: Request) {
         push({ type: "meta", sessionId, runId, traceId: rootObservation?.traceId, langfuseEnabled });
         beginStage("planning", "感知输入", "主 Agent 已读取项目简报");
 
-        const state = await runMainAgent({
+        // runMainAgent is now an AsyncGenerator; drive it to completion
+        // while the legacy onEvent callback handles all side-effects.
+        const gen = runMainAgent({
           sessionId,
           runId,
           persona,
@@ -341,6 +343,16 @@ export async function POST(request: Request) {
             }
           },
         });
+
+        // Drain the generator to drive execution; capture the final return value
+        let state: MainAgentState;
+        {
+          let iterResult = await gen.next();
+          while (!iterResult.done) {
+            iterResult = await gen.next();
+          }
+          state = iterResult.value;
+        }
 
         finalizeActiveStage();
         const metrics = buildMetrics({

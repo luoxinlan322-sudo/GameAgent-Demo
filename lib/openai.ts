@@ -8,6 +8,10 @@ export function getOpenAIClient() {
     ? new OpenAI({
         apiKey,
         ...(baseURL ? { baseURL } : {}),
+        // Disable SDK-level timeout & retries — our callWithTimeoutRetry handles these
+        // to avoid double-timeout races and dangling promises.
+        timeout: 10 * 60 * 1000, // 10 min (match LLM_TIMEOUT_MS default)
+        maxRetries: 0,           // no SDK-level retry; our wrapper retries transient errors
       })
     : null;
 }

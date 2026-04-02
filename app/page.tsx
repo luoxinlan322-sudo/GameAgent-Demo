@@ -1,8 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { NavBar } from "@/components/nav-bar";
 import { PersonaForm } from "@/components/persona-form";
 import { ResultTabs } from "@/components/result-tabs";
+import { StageStatus } from "@/components/stage-status";
+import type { NodeInfo, StageTimingItem } from "@/components/stage-status";
 import type { Html5PreparationPackage } from "@/lib/html5-render-schemas";
 import type { AgentPlan, CreativePack, Evaluation, GameProposal, PersonaInput, ReviewHistoryItem } from "@/lib/schemas";
 
@@ -27,7 +30,6 @@ const initialPersona: PersonaInput = {
 };
 
 type RunStage = "idle" | "planning" | "generating" | "evaluating" | "done" | "error";
-type NodeStatus = "running" | "done" | "fallback" | "error" | null;
 
 export default function HomePage() {
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -41,7 +43,8 @@ export default function HomePage() {
   const [isRunning, setIsRunning] = useState(false);
   const [currentStage, setCurrentStage] = useState<RunStage>("idle");
   const [currentStep, setCurrentStep] = useState<string | null>(null);
-  const [currentNodeStatus, setCurrentNodeStatus] = useState<NodeStatus>(null);
+  const [nodeStatuses, setNodeStatuses] = useState<Map<string, NodeInfo>>(new Map());
+  const [stageTimings, setStageTimings] = useState<StageTimingItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
@@ -63,14 +66,15 @@ export default function HomePage() {
     setIsRunning(true);
     setError(null);
     setCurrentStage("planning");
-    setCurrentNodeStatus("running");
-    setCurrentStep("主 Agent 正在理解项目简报，并起草首轮规划。");
+    setCurrentStep("主 Agent 正在理解项目简报...");
     setPlan(null);
     setProposal(null);
     setCreativePack(null);
     setHtml5Preparation(null);
     setEvaluation(null);
     setReviewHistory([]);
+    setNodeStatuses(new Map());
+    setStageTimings([]);
     setElapsedSeconds(0);
 
     try {
@@ -115,52 +119,48 @@ export default function HomePage() {
         for (const line of lines) {
           if (!line.trim()) continue;
 
-          const event = JSON.parse(line) as
-            | { type: "meta"; sessionId: string; runId: string }
-            | {
-                type: "node";
-                node: string;
-                phase: string;
-                title: string;
-                status: "running" | "done" | "fallback" | "error";
-                iteration: number;
-                summary: string;
-                output?: unknown;
-              }
-            | { type: "stage"; stage: RunStage; currentStep?: string }
-            | { type: "plan"; plan: AgentPlan }
-            | { type: "generation"; generation: { proposal: GameProposal; creativePack: CreativePack } }
-            | { type: "html5_preparation"; html5Preparation: Html5PreparationPackage }
-            | { type: "evaluation"; evaluation: Evaluation }
-            | { type: "review_history"; history: ReviewHistoryItem[] }
-            | { type: "error"; error: string };
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const event = JSON.parse(line) as any;
+
+          if (event.type === "heartbeat") continue;
 
           if (event.type === "meta") setSessionId(event.sessionId);
 
           if (event.type === "stage") {
             setCurrentStage(event.stage);
             setCurrentStep(event.currentStep || null);
-            if (event.stage === "done") setCurrentNodeStatus("done");
-            if (event.stage === "error") setCurrentNodeStatus("error");
+            if (event.stageTimings) {
+              setStageTimings(
+                (event.stageTimings as Array<{ label: string; durationMs?: number; message: string }>).map((t) => ({
+                  label: t.label,
+                  durationMs: t.durationMs,
+                  message: t.message,
+                })),
+              );
+            }
           }
 
           if (event.type === "node") {
-            setCurrentNodeStatus(event.status);
-            const suffix =
-              event.status === "running" ? "running" : event.status === "fallback" ? "fallback" : event.status === "error" ? "error" : "done";
-          const statusText =
-            event.status === "running"
-              ? "运行中"
-              : event.status === "fallback"
-                ? "已回退"
-                : event.status === "error"
-                  ? "异常"
-                  : "完成";
-          setCurrentStep(`${event.title} / 第 ${event.iteration} 轮 / ${statusText}`);
+            const statusText =
+              event.status === "running" ? "运行中" : event.status === "fallback" ? "已回退" : event.status === "error" ? "异常" : "完成";
+            setCurrentStep(`${event.title} / 第 ${event.iteration} 轮 / ${statusText}`);
 
-            if (event.phase === "感知输入" || event.phase === "推理规划") setCurrentStage("planning");
-            if (event.phase === "工具执行") setCurrentStage("generating");
-            if (event.phase === "评审修缮") setCurrentStage("evaluating");
+            setNodeStatuses((prev) => {
+              const next = new Map(prev);
+              next.set(event.node, {
+                node: event.node,
+                title: event.title,
+                status: event.status,
+                iteration: event.iteration,
+              });
+              return next;
+            });
+
+            // Infer stage from phase
+            const phase = event.phase as string;
+            if (phase.includes("感知") || phase.includes("规划")) setCurrentStage("planning");
+            else if (phase.includes("工具")) setCurrentStage("generating");
+            else if (phase.includes("反馈") || phase.includes("评审")) setCurrentStage("evaluating");
           }
 
           if (event.type === "plan") setPlan(event.plan);
@@ -175,39 +175,43 @@ export default function HomePage() {
         }
       }
     } catch (caughtError) {
-      setPlan(null);
-      setProposal(null);
-      setCreativePack(null);
-      setHtml5Preparation(null);
-      setEvaluation(null);
-      setReviewHistory([]);
+      // Keep partial results — don't clear data on error
       setError(caughtError instanceof Error ? caughtError.message : "运行失败");
       setCurrentStage("error");
-      setCurrentNodeStatus("error");
       setCurrentStep("运行失败");
     } finally {
       setIsRunning(false);
     }
   }
 
-  const overlayText =
-    currentNodeStatus === "fallback"
-      ? "当前节点触发了本地回退结果，但主 Agent 会继续编排后续工具与评审。"
-      : currentNodeStatus === "error"
-        ? "当前节点执行失败，页面会展示具体错误原因。"
-        : "请求正在运行中，主 Agent 可能会经过意图识别、规划、工具选择、并发执行、评审和返修。";
+  const hasAnyResult = Boolean(proposal || creativePack || evaluation);
 
   return (
     <main className="shell">
       <section className="hero hero-minimal">
         <h1>游戏设计生成与评审工作台</h1>
+        <NavBar />
       </section>
 
       <section className="hero-grid">
         <PersonaForm persona={persona} isRunning={isRunning} onChange={setPersona} onPreset={setPersona} onSubmit={runLoop} />
 
         <div className="report-stack">
-          {plan && proposal && creativePack && evaluation ? (
+          {/* Inline progress — always visible when not idle */}
+          {currentStage !== "idle" && (
+            <StageStatus
+              currentStage={currentStage}
+              currentStep={currentStep}
+              stageTimings={stageTimings}
+              nodeStatuses={nodeStatuses}
+              elapsedSeconds={isRunning ? elapsedSeconds : undefined}
+            />
+          )}
+
+          {error ? <div className="panel card error">{error}</div> : null}
+
+          {/* Progressive results — show tabs as data arrives */}
+          {hasAnyResult ? (
             <ResultTabs
               persona={persona}
               plan={plan}
@@ -216,8 +220,9 @@ export default function HomePage() {
               html5Preparation={html5Preparation}
               evaluation={evaluation}
               reviewHistory={reviewHistory}
+              isStreaming={isRunning}
             />
-          ) : (
+          ) : currentStage !== "idle" && !error ? (
             <section className="panel empty">
               <div className="empty-badge">
                 {currentStage === "planning"
@@ -235,25 +240,20 @@ export default function HomePage() {
                     ? "主 Agent 正在编排设计工具，合成首稿设计包。"
                     : currentStage === "evaluating"
                       ? "主 Agent 正在运行一致性检查、评估和返修决策。"
-                      : "暂无结果"}
+                      : "等待输出..."}
               </h2>
             </section>
-          )}
-
-          {error ? <div className="panel card error">{error}</div> : null}
+          ) : currentStage === "idle" ? (
+            <section className="panel empty">
+              <div className="empty-badge">等待中</div>
+              <h2 className="panel-title">暂无结果</h2>
+              <p style={{ color: "var(--muted)", margin: 0 }}>
+                填写左侧项目简报并点击「生成并评审」开始。
+              </p>
+            </section>
+          ) : null}
         </div>
       </section>
-
-      {isRunning ? (
-        <div className="run-overlay" aria-live="polite">
-          <div className="run-overlay-card">
-            <div className="run-overlay-badge">Agent 运行中</div>
-            <h2>{currentStep || "正在处理请求"}</h2>
-            <p>{overlayText}</p>
-            <div className="run-overlay-timer">{elapsedSeconds}s</div>
-          </div>
-        </div>
-      ) : null}
     </main>
   );
 }

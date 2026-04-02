@@ -1,4 +1,4 @@
-import type {
+﻿import type {
   AgentPlan,
   AssetManifest,
   CharacterCard,
@@ -143,7 +143,7 @@ Requirements:
 ${briefBlock(brief)}
 ${jsonBlock("Current plan", plan)}
 ${repairChecklistBlock(repairPlan, stageRepairGuidance("gameplay_tool"))}
-${previousOutputBlock(previousBaseline)}
+${previousOutputBlock(previousBaseline, iteration)}
 Current iteration: ${iteration}
 `.trim();
 }
@@ -176,13 +176,8 @@ Requirements:
 - coreCurrencies must include at least one basic operating currency and one expansion or event progression currency.
 - faucets, sinks, and upgradeThresholds should each contain at least 3 items aligned with the main loop.
 - orderCostLoop must explicitly describe the closed loop from order reward to reinvestment to stronger future orders.
-- 【专业数值要求】economy_tool 的输出必须达到专业策划级别：
-  - orderCostLoop 必须包含具体的数值公式，例如"单笔订单收益 = 基础报酬 × 菜品等级系数(1.0/1.3/1.6) + 小费随机(0~20%基础报酬)"。
-  - upgradeThresholds 每条须注明具体花费数额和解锁条件，例如"经营等级3级(累计收入≥500金币)时花费200金币+2扩建券解锁二号摊位升级"。
-  - faucets 和 sinks 需量化每次产出/消耗范围，例如"每笔订单产出15~40金币"。
-  - pacingControls 需描述数值曲线，例如"前10单利润率约60%，中期(11~30单)利润率下降到35%以维持扩建需求"。
-  - 如有成长曲线或平衡公式，必须用简洁的数学表达式写出(如 cost = base × 1.15^level)。
-- decorationUnlocks and monetizationHooks should mention expansion tickets, limited decorations, or equivalent prototype hooks when relevant.
+- 銆愪笓涓氭暟鍊艰姹傘€慹conomy_tool 鐨勮緭鍑哄繀椤昏揪鍒颁笓涓氱瓥鍒掔骇鍒細
+  - orderCostLoop 蹇呴』鍖呭惈鍏蜂綋鐨勬暟鍊煎叕寮忥紝渚嬪"鍗曠瑪璁㈠崟鏀剁泭 = 鍩虹鎶ラ叕 脳 鑿滃搧绛夌骇绯绘暟(1.0/1.3/1.6) + 灏忚垂闅忔満(0~20%鍩虹鎶ラ叕)"銆?  - upgradeThresholds 姣忔潯椤绘敞鏄庡叿浣撹姳璐规暟棰濆拰瑙ｉ攣鏉′欢锛屼緥濡?缁忚惀绛夌骇3绾?绱鏀跺叆鈮?00閲戝竵)鏃惰姳璐?00閲戝竵+2鎵╁缓鍒歌В閿佷簩鍙锋憡浣嶅崌绾?銆?  - faucets 鍜?sinks 闇€閲忓寲姣忔浜у嚭/娑堣€楄寖鍥达紝渚嬪"姣忕瑪璁㈠崟浜у嚭15~40閲戝竵"銆?  - pacingControls 闇€鎻忚堪鏁板€兼洸绾匡紝渚嬪"鍓?0鍗曞埄娑︾巼绾?0%锛屼腑鏈?11~30鍗?鍒╂鼎鐜囦笅闄嶅埌35%浠ョ淮鎸佹墿寤洪渶姹?銆?  - 濡傛湁鎴愰暱鏇茬嚎鎴栧钩琛″叕寮忥紝蹇呴』鐢ㄧ畝娲佺殑鏁板琛ㄨ揪寮忓啓鍑?濡?cost = base 脳 1.15^level)銆?- decorationUnlocks and monetizationHooks should mention expansion tickets, limited decorations, or equivalent prototype hooks when relevant.
 - pacingControls should describe at least early-stage and mid-stage pacing.
   - If gameplay exposes resource_token entities or named order/build carriers, explicitly map them into the economy layer through coreCurrencies, faucets, sinks, or orderCostLoop instead of leaving them implicit.
   - When gameplay defines a runtime resource entity, mention its exact entityId or exact entityName at least once in coreCurrencies, faucets, sinks, or orderCostLoop so downstream runtime mapping can prove the linkage.
@@ -192,7 +187,7 @@ ${briefBlock(brief)}
 ${jsonBlock("Current plan", plan)}
 ${jsonBlock("Gameplay structure", gameplay)}
 ${repairChecklistBlock(repairPlan, stageRepairGuidance("economy_tool"))}
-${previousOutputBlock(previousBaseline)}
+${previousOutputBlock(previousBaseline, iteration)}
 Current iteration: ${iteration}
 `.trim();
 }
@@ -247,7 +242,7 @@ ${jsonBlock("Current plan", plan)}
 ${jsonBlock("Gameplay structure", gameplay)}
 ${jsonBlock("Economy design", economy)}
 ${repairChecklistBlock(repairPlan, stageRepairGuidance("system_design_tool"))}
-${previousOutputBlock(previousBaseline)}
+${previousOutputBlock(previousBaseline, iteration)}
 Current iteration: ${iteration}
 `.trim();
 }
@@ -286,7 +281,7 @@ ${jsonBlock("Gameplay structure", gameplay)}
 ${jsonBlock("Economy design", economy)}
 ${jsonBlock("System design", systems)}
 ${repairChecklistBlock(repairPlan, stageRepairGuidance("proposal_tool"))}
-${previousOutputBlock(previousBaseline)}
+${previousOutputBlock(previousBaseline, iteration)}
 Current iteration: ${iteration}
 `.trim();
 }
@@ -472,7 +467,7 @@ ${jsonBlock("Current plan", plan)}
 ${jsonBlock("System design", systems)}
 ${jsonBlock("Scene design", scene)}
 ${repairChecklistBlock(repairPlan, stageRepairGuidance("ui_architecture_tool"))}
-${previousOutputBlock(previousBaseline)}
+${previousOutputBlock(previousBaseline, iteration)}
 Current iteration: ${iteration}
 `.trim();
 }
@@ -494,7 +489,7 @@ ${STORY_FEWSHOT}
 
 Requirements:
 - characterRoster must be a pure array of role names only.
-- characterRoster should contain 3-6 role names depending on the game complexity. Do NOT always default to exactly 3 — if the story implies support characters, visitors, or quest-givers, include them.
+- characterRoster should contain 3-6 role names depending on the game complexity. Do NOT always default to exactly 3 鈥?if the story implies support characters, visitors, or quest-givers, include them.
 - chapterAnchors must contain at least 3 short reusable anchors for downstream tools.
 - mainPlotBeats must contain at least 3 short reusable beats for downstream tools.
 - chapterAnchors and mainPlotBeats must stay runtime-friendly, reusable, and concise instead of collapsing into one broad summary.
@@ -507,7 +502,7 @@ ${jsonBlock("Current plan", plan)}
 ${jsonBlock("Proposal", proposal)}
 ${jsonBlock("System design", systems)}
 ${repairChecklistBlock(repairPlan, stageRepairGuidance("story_tool"))}
-${previousOutputBlock(previousBaseline)}
+${previousOutputBlock(previousBaseline, iteration)}
 Current iteration: ${iteration}
 `.trim();
 }
@@ -527,7 +522,7 @@ ${jsonOnlyInstruction(["cards", "populationSummary", "entityRegistry"])}
 ${productionGradeInstruction("character_tool", ["cover every core role from the story roster", "map each role to interaction responsibility and visual keywords", "keep storyAnchors aligned to chapterAnchors or mainPlotBeats", "separate core roles, support roles, and visitor-style roles when relevant"])}
 
 Requirements:
-- The number of cards should match the story complexity: return 3-6 cards depending on how many named roles the story contains. Do NOT always default to exactly 3 — if characterRoster has 4-6 names, output a card for each.
+- The number of cards should match the story complexity: return 3-6 cards depending on how many named roles the story contains. Do NOT always default to exactly 3 鈥?if characterRoster has 4-6 names, output a card for each.
 - Every core role in characterRoster must have a corresponding card.
 - storyAnchors must reference story.chapterAnchors or mainPlotBeats, not freeform role summaries.
 - Each card must include entityId and characterCategory.
@@ -539,7 +534,7 @@ ${jsonBlock("Current plan", plan)}
 ${jsonBlock("System design", systems)}
 ${jsonBlock("Story package", story)}
 ${repairChecklistBlock(repairPlan, stageRepairGuidance("character_tool"))}
-${previousOutputBlock(previousBaseline)}
+${previousOutputBlock(previousBaseline, iteration)}
 Current iteration: ${iteration}
 `.trim();
 }
@@ -564,16 +559,9 @@ ${productionGradeInstruction("asset_manifest_tool", ["map assets to concrete run
 ${ASSET_FEWSHOT}
 
 Requirements:
-- assetType must be one of: 角色立绘, 场景背景, 场景物件, 建筑单体, UI图标, UI面板, 活动插图, 装扮素材.
-- 【场景背景硬性要求】assetGroups 中必须包含至少一个 assetType="场景背景" 的条目。场景背景是整个可玩区域的大底图，所有建筑坑位、交互热点、角色和道具都渲染在它上面。场景背景必须满足：
-  - spec 应为宽屏比例（如 1920x1080 或 2560x1440），适合移动端横屏或竖屏构图。
-  - layer 应为场景最底层（如 "scene-background"）。
-  - runtimeTargets 应包含场景根容器或底层画布的引用。
-  - deliveryScope 应为 "scene"。
-  - 场景背景的构图和配色必须与 buildingSlots 和 sceneZones 的空间布局契合——建筑坑位和交互热点在背景上的位置应有视觉锚点或留白区域。
-  - sourceDependencies 应引用场景设计的 sceneConcept 和相关 sceneZones。
-- 【角色立绘硬性要求】story.characterRoster 中的每一个角色都必须有一个对应的"角色立绘"类型资产。如果 characterRoster 有 N 个角色，assetGroups 中必须至少有 N 个 assetType="角色立绘" 的条目，每个角色一个。不允许遗漏任何角色的立绘。
-- Cover key buildings, key scene props, event carriers, UI entry assets, and role portraits when relevant.
+- assetType must be one of: 瑙掕壊绔嬬粯, 鍦烘櫙鑳屾櫙, 鍦烘櫙鐗╀欢, 寤虹瓚鍗曚綋, UI鍥炬爣, UI闈㈡澘, 娲诲姩鎻掑浘, 瑁呮壆绱犳潗.
+- 銆愬満鏅儗鏅‖鎬ц姹傘€慳ssetGroups 涓繀椤诲寘鍚嚦灏戜竴涓?assetType="鍦烘櫙鑳屾櫙" 鐨勬潯鐩€傚満鏅儗鏅槸鏁翠釜鍙帺鍖哄煙鐨勫ぇ搴曞浘锛屾墍鏈夊缓绛戝潙浣嶃€佷氦浜掔儹鐐广€佽鑹插拰閬撳叿閮芥覆鏌撳湪瀹冧笂闈€傚満鏅儗鏅繀椤绘弧瓒筹細
+  - spec 搴斾负瀹藉睆姣斾緥锛堝 1920x1080 鎴?2560x1440锛夛紝閫傚悎绉诲姩绔í灞忔垨绔栧睆鏋勫浘銆?  - layer 搴斾负鍦烘櫙鏈€搴曞眰锛堝 "scene-background"锛夈€?  - runtimeTargets 搴斿寘鍚満鏅牴瀹瑰櫒鎴栧簳灞傜敾甯冪殑寮曠敤銆?  - deliveryScope 搴斾负 "scene"銆?  - 鍦烘櫙鑳屾櫙鐨勬瀯鍥惧拰閰嶈壊蹇呴』涓?buildingSlots 鍜?sceneZones 鐨勭┖闂村竷灞€濂戝悎鈥斺€斿缓绛戝潙浣嶅拰浜や簰鐑偣鍦ㄨ儗鏅笂鐨勪綅缃簲鏈夎瑙夐敋鐐规垨鐣欑櫧鍖哄煙銆?  - sourceDependencies 搴斿紩鐢ㄥ満鏅璁＄殑 sceneConcept 鍜岀浉鍏?sceneZones銆?- 銆愯鑹茬珛缁樼‖鎬ц姹傘€憇tory.characterRoster 涓殑姣忎竴涓鑹查兘蹇呴』鏈変竴涓搴旂殑"瑙掕壊绔嬬粯"绫诲瀷璧勪骇銆傚鏋?characterRoster 鏈?N 涓鑹诧紝assetGroups 涓繀椤昏嚦灏戞湁 N 涓?assetType="瑙掕壊绔嬬粯" 鐨勬潯鐩紝姣忎釜瑙掕壊涓€涓€備笉鍏佽閬楁紡浠讳綍瑙掕壊鐨勭珛缁樸€?- Cover key buildings, key scene props, event carriers, UI entry assets, and role portraits when relevant.
 - If repairPlan mentions missing activity entry, expansion ticket, limited decoration, or role art support, add explicit asset carriers.
 - Every asset group must include entityIds, runtimeTargets, and deliveryScope.
 - entityIds should reference upstream gameplay/system/scene/character entities whenever possible.
@@ -592,7 +580,7 @@ ${jsonBlock("UI architecture", ui)}
 ${jsonBlock("Story package", story)}
 ${jsonBlock("Character cards", characters)}
 ${repairChecklistBlock(repairPlan, stageRepairGuidance("asset_manifest_tool"))}
-${previousOutputBlock(previousBaseline)}
+${previousOutputBlock(previousBaseline, iteration)}
 Current iteration: ${iteration}
 `.trim();
 }
@@ -656,7 +644,7 @@ ${jsonBlock("Story package", story)}
 ${jsonBlock("Character cards", characters)}
 ${jsonBlock("Asset manifest", assetManifest)}
 ${repairChecklistBlock(repairPlan, stageRepairGuidance("copywriting_tool"))}
-${previousOutputBlock(previousBaseline)}
+${previousOutputBlock(previousBaseline, iteration)}
 Current iteration: ${iteration}
 `.trim();
 }

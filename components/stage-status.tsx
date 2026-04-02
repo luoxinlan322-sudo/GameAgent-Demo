@@ -1,21 +1,55 @@
-type StageKey = "idle" | "planning" | "generating" | "evaluating" | "done" | "error";
+export type StageKey = "idle" | "planning" | "generating" | "evaluating" | "done" | "error";
+
+export type NodeInfo = {
+  node: string;
+  title: string;
+  status: "running" | "done" | "fallback" | "error";
+  iteration: number;
+};
+
+export type StageTimingItem = {
+  label: string;
+  durationMs?: number;
+  message: string;
+};
 
 type StageStatusProps = {
   currentStage: StageKey;
   currentStep?: string | null;
-  stageTimings?: Array<{ label: string; durationMs?: number; message: string }>;
+  stageTimings?: StageTimingItem[];
+  nodeStatuses?: Map<string, NodeInfo>;
+  elapsedSeconds?: number;
 };
 
 const stages = [
-  { key: "planning", title: "\u7406\u89e3\u76ee\u6807", desc: "\u8bc6\u522b\u54c1\u7c7b\u4e0e\u9a8c\u8bc1\u76ee\u6807" },
-  { key: "planning-2", title: "\u5236\u5b9a\u8ba1\u5212", desc: "\u786e\u5b9a\u6210\u529f\u6807\u51c6\u4e0e\u98ce\u9669" },
-  { key: "planning-3", title: "\u62c6\u5206\u5b50\u4efb\u52a1", desc: "\u62c6\u5230\u7b56\u5212\u3001\u5267\u60c5\u3001\u89d2\u8272\u4e0e\u8d44\u4ea7" },
-  { key: "generating", title: "\u8c03\u7528\u6a21\u578b", desc: "\u751f\u6210\u65b9\u6848\u4e0e\u521b\u610f\u5305" },
-  { key: "evaluating", title: "\u68c0\u67e5\u7ed3\u679c", desc: "\u8fd0\u884c\u4e00\u81f4\u6027\u68c0\u67e5\u4e0e\u8bc4\u5206" },
-  { key: "done", title: "\u51b3\u5b9a\u4e0b\u4e00\u6b65", desc: "\u7ed9\u51fa\u6d4b\u8bd5\u5efa\u8bae\u4e0e\u4ea4\u4ed8\u7269" },
+  { key: "planning", title: "理解目标", desc: "识别品类与验证目标" },
+  { key: "planning-2", title: "制定计划", desc: "确定成功标准与风险" },
+  { key: "planning-3", title: "拆分子任务", desc: "拆到策划、剧情、角色与资产" },
+  { key: "generating", title: "调用模型", desc: "生成方案与创意包" },
+  { key: "evaluating", title: "检查结果", desc: "运行一致性检查与评分" },
+  { key: "done", title: "决定下一步", desc: "给出测试建议与交付物" },
 ] as const;
 
-export function StageStatus({ currentStage, currentStep, stageTimings = [] }: StageStatusProps) {
+function formatDuration(ms?: number) {
+  if (typeof ms !== "number") return "...";
+  if (ms >= 60_000) return `${(ms / 60_000).toFixed(1)}m`;
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
+}
+
+function formatElapsed(seconds: number) {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return m > 0 ? `${m}:${String(s).padStart(2, "0")}` : `${s}s`;
+}
+
+const statusIcon: Record<NodeInfo["status"], string> = {
+  running: "●",
+  done: "✓",
+  fallback: "⚠",
+  error: "✕",
+};
+
+export function StageStatus({ currentStage, currentStep, stageTimings = [], nodeStatuses, elapsedSeconds }: StageStatusProps) {
   const currentIndex =
     currentStage === "idle"
       ? -1
@@ -25,27 +59,38 @@ export function StageStatus({ currentStage, currentStep, stageTimings = [] }: St
           ? 3
           : currentStage === "evaluating"
             ? 4
-            : currentStage === "done"
+            : currentStage === "done" || currentStage === "error"
               ? 5
               : 0;
 
+  const nodes = nodeStatuses ? Array.from(nodeStatuses.values()) : [];
+  const isActive = currentStage !== "idle" && currentStage !== "done" && currentStage !== "error";
+
   return (
     <section className="panel card status-panel top-stage-panel">
-      <div className="panel-head">
-        <span className="panel-tag">Agent \u5faa\u73af</span>
-        <h2 className="panel-title">执行进度</h2>
+      <div className="stage-panel-head">
+        <div>
+          <span className="panel-tag">{isActive ? "Agent 运行中" : currentStage === "done" ? "运行完成" : currentStage === "error" ? "运行异常" : "Agent 循环"}</span>
+          <h2 className="panel-title">执行进度</h2>
+        </div>
+        {typeof elapsedSeconds === "number" && (
+          <div className={`elapsed-timer${isActive ? " is-active" : ""}`}>
+            {formatElapsed(elapsedSeconds)}
+          </div>
+        )}
       </div>
 
-      <div className="review-note" style={{ marginTop: 0 }}>
-        <span className="review-note-label">当前步骤说明</span>
-        <p>{currentStep || "\u7b49\u5f85\u5f00\u59cb\u8fd0\u884c"}</p>
-      </div>
+      {currentStep && (
+        <div className="review-note" style={{ marginTop: 0 }}>
+          <span className="review-note-label">当前步骤</span>
+          <p>{currentStep}</p>
+        </div>
+      )}
 
       <div className="stage-grid">
         {stages.map((stage, index) => {
           const active = index <= currentIndex;
           const current = index === currentIndex;
-
           return (
             <div className={`stage-card${active ? " is-active" : ""}${current ? " is-current" : ""}`} key={stage.key}>
               <div className="stage-index">0{index + 1}</div>
@@ -58,17 +103,27 @@ export function StageStatus({ currentStage, currentStep, stageTimings = [] }: St
         })}
       </div>
 
-      {stageTimings.length > 0 ? (
-        <div className="stage-timing-grid">
-          {stageTimings.map((item) => (
-            <div className="summary-box section-box" key={item.label}>
-              <p className="kicker">{item.label}</p>
-              <p style={{ margin: "8px 0 6px" }}>{item.durationMs ?? 0}ms</p>
-              <p style={{ margin: 0 }}>{item.message}</p>
+      {nodes.length > 0 && (
+        <div className="node-grid">
+          {nodes.map((node) => (
+            <div key={node.node} className={`node-chip is-${node.status}`}>
+              <span className="node-chip-icon">{statusIcon[node.status]}</span>
+              <span className="node-chip-label">{node.title}</span>
+              {node.iteration > 1 && <span className="node-chip-iter">R{node.iteration}</span>}
             </div>
           ))}
         </div>
-      ) : null}
+      )}
+
+      {stageTimings.length > 0 && (
+        <div className="stage-timing-strip">
+          {stageTimings.map((item) => (
+            <span className="stage-timing-chip" key={item.label}>
+              {item.label} <strong>{formatDuration(item.durationMs)}</strong>
+            </span>
+          ))}
+        </div>
+      )}
     </section>
   );
 }

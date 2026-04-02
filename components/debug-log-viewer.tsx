@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { NavBar } from "./nav-bar";
 import {
   AGENT_PHASES,
   getExecutionBatches,
@@ -170,9 +171,14 @@ function getEdgeTaskMap(report?: ConsistencyReport) {
 }
 
 function ArchitecturePanel() {
+  const [expanded, setExpanded] = useState(false);
   return (
-    <section className="debug-card debug-card-wide">
-      <h2>主 Agent 架构</h2>
+    <section className="debug-card debug-card-wide debug-collapsible">
+      <button type="button" className="debug-collapse-toggle" onClick={() => setExpanded(!expanded)}>
+        <h2>主 Agent 架构</h2>
+        <span className="debug-collapse-icon">{expanded ? "▼" : "▶"}</span>
+      </button>
+      {expanded && (
       <div className="history-list">
         {AGENT_PHASES.map((phase) => {
           const phaseTools = phase.tools.map((tool) => TOOL_EXECUTION_CONFIG[tool]);
@@ -200,6 +206,7 @@ function ArchitecturePanel() {
           );
         })}
       </div>
+      )}
     </section>
   );
 }
@@ -642,6 +649,7 @@ function RunPanel({ group }: { group: RunGroup }) {
 export function DebugLogViewer() {
   const [logs, setLogs] = useState<DebugLogEntry[]>([]);
   const [runs, setRuns] = useState<RunSnapshot[]>([]);
+  const [lastUpdated, setLastUpdated] = useState<string>("");
 
   useEffect(() => {
     let stopped = false;
@@ -654,6 +662,7 @@ export function DebugLogViewer() {
         if (!stopped) {
           setLogs(Array.isArray(logsJson.logs) ? logsJson.logs : []);
           setRuns(Array.isArray(runsJson.runs) ? runsJson.runs : []);
+          setLastUpdated(new Date().toLocaleTimeString("zh-CN"));
         }
       } catch {
         if (!stopped) {
@@ -680,8 +689,10 @@ export function DebugLogViewer() {
           <h1 className="debug-title">项目架构与执行控制台</h1>
           <p className="debug-subtitle">
             在一个页面里查看执行阶段、并发批次、一致性图、返修计划与 HTML5 交付包。
+            {lastUpdated && <span className="debug-last-updated"> · 最后刷新 {lastUpdated}</span>}
           </p>
         </div>
+        <NavBar />
       </header>
 
       <ArchitecturePanel />

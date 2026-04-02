@@ -1,5 +1,6 @@
 import { zodResponseFormat } from "openai/helpers/zod";
 import type OpenAI from "openai";
+import { APIConnectionError, APIConnectionTimeoutError, RateLimitError, InternalServerError } from "openai";
 import { type ZodType } from "zod";
 import { startObservation, type LangfuseObservation } from "@langfuse/tracing";
 import { createDebugLog, finalizeDebugLog, type DebugLogEntry } from "../debug-log";
@@ -7,6 +8,7 @@ import { isLangfuseEnabled } from "../langfuse";
 import { normalizeValueForSchema } from "./field-normalizers";
 import { cleanupStageSpecificData } from "./stage-cleanup";
 import { validateStageSemanticReadiness } from "./stage-validation";
+import { getRepairGuidance } from "../tool-registry";
 
 type ChatRole = "system" | "user" | "assistant";
 type StructuredMode = "json_object" | "function_call";
@@ -131,91 +133,51 @@ function createLangfuseGeneration(params: RunStructuredChatParams<unknown>) {
   return null;
 }
 
+/**
+ * @deprecated Use getRepairGuidance from tool-registry directly.
+ * Kept as a thin backward-compatible proxy.
+ */
 export function stageRepairGuidance(stage: string) {
-  switch (stage) {
-    case "economy_tool":
-      return [
-        "economy_tool 修复重点：",
-        "- coreCurrencies 至少 3 项，并覆盖基础经营货币与扩建/活动进度货币。",
-        "- orderCostLoop 必须清楚描述订单产出、资源投入、升级/扩建、收益提升的闭环。",
-        "- upgradeThresholds 至少 3 项，且与订单、扩建、装饰解锁相对应。",
-      ].join("\n");
-    case "system_design_tool":
-      return [
-        "system_design_tool 修复重点：",
-        "- gameplay 中的人物、访客、居民、顾客、陪伴或对话角色，必须在 systemEntities 中稳定暴露为 character 或 visitor carriers。",
-        "- systemToEntityMap 必须把这些 people-facing carriers 挂到 roleInteractionSystem、eventSystem、missionSystem 或其他 loop-facing system。",
-        "- 纯资源、货币、券、点数不要误标成 building/facility；真正可见的经营载体才使用 building/facility。",
-        "- 修复时保留已正确的系统实体，只纠正错类型、漏映射和缺责任说明的问题。",
-      ].join("\n");
-    case "scene_design_tool":
-      return [
-        "scene_design_tool 修复重点：",
-        "- interactiveAreas、contentHotspots 必须承接活动系统与角色互动系统。",
-        "- 场景热区命名要能被 UI、文案、资产清单直接复用。",
-        "- navigationFlow 与 stateTransitions 要体现订单完成、扩建完成、活动开放后的变化。",
-        "- 如果 repairPlan 点名了缺失热区、公告板、展示点或弹窗名称，必须逐字补进 interactiveAreas 或 contentHotspots。",
-      ].join("\n");
-    case "scene_design_patch_tool":
-      return [
-        "scene_design_patch_tool repair focus:",
-        "- Return an additive patch only. Do not rewrite the full scene package.",
-        "- Preserve valid baseline carriers and only append missing runtime entities, mappings, and building definitions.",
-        "- For each missing entity, verify sceneEntities, zoneEntityMap, and buildingDefinitions together.",
-        "- Reuse checker-named entityId, entityName, zoneName, slotName, and buildingId exactly when they are already valid identifiers.",
-      ].join("\n");
-    case "ui_architecture_tool":
-      return [
-        "ui_architecture_tool 修复重点：",
-        "- buildModePanel 必须拆成 2 到 4 个离散元素。",
-        "- feedbackLayer 必须覆盖订单完成、扩建完成、角色互动或活动触发中的至少 3 类反馈。",
-        "- eventEntry 必须对应真实场景活动热区，不能虚构新入口。",
-      ].join("\n");
-    case "story_tool":
-      return [
-        "story_tool 修复重点：",
-        "- characterRoster 只能是纯角色名数组。",
-        "- 每个角色名都必须在 mainPlotBeats 或 chapterAnchors 中逐字出现。",
-        "- chapterAnchors 要可直接复用到角色卡锚点、活动插图和页面文案。",
-        "- 配角不能只停留在功能说明层，必须在 chapterAnchors 或 mainPlotBeats 中获得明确事件职责与情感动机。",
-        "- 如果上一轮失败是角色卡锚点失效，本轮优先修 story 自身的锚点设计，不要让下游继续发明新事件标题。",
-      ].join("\n");
-    case "character_tool":
-      return [
-        "character_tool 修复重点：",
-        "- cards 数量必须与 story.characterRoster 一致，name 必须逐字复用。",
-        "- characterRoster 里出现的每个角色都必须有资料卡，不能遗漏团团、小桃、阿竹这类具体角色名。",
-        "- interactionResponsibility 与 collectionValue 不能写成空泛短词，必须说明职责与可收集收益。",
-        "- storyAnchors 只能引用 story.chapterAnchors 或 mainPlotBeats 中已存在的完整锚点句子，绝不能填角色名。",
-        "- storyAnchors 优先直接复用 story.chapterAnchors 原句；如果 story 里没有对应锚点，说明应回到 story_tool 修正，而不是在角色卡里自造新标题。",
-      ].join("\n");
-    case "copywriting_tool":
-      return [
-        "copywriting_tool 修复重点：",
-        "- 只能复用现有角色名、场景热区名、UI target、资产名与经济挂点名。",
-        "- sceneHints 要优先覆盖关键 interactiveAreas，并补足至少 2 个 contentHotspots；characterLines 要覆盖每个角色；eventEntryCopy 或 taskAndOrderCopy 要覆盖核心 chapterAnchors。",
-        "- 关键剧情锚点要在文案里直接体现目标、奖励或情绪，不要只做泛化改写。",
-        "- assetLabels 至少覆盖主摊位、订单按钮图标、活动 Banner、关键活动入口载体和每个核心角色展示名称。",
-        "- 如果 repairPlan 点名了缺失热区、锚点、角色立绘或关键资产标签，就必须逐条补齐，并在 target 或 relatedEntity 中逐字复用这些名字。",
-        "- relatedEntity 必须保持短而稳定；只写角色名、热区名、chapterAnchor、assetName 或 entityId，不要写整句说明。",
-        "- 不要发明新的按钮名、活动名、资产名或角色名。",
-        "- sceneHints.target 必须直接复用 scene.interactiveAreas 或 scene.contentHotspots 的原始名字，角色名只放在 text 或 relatedEntity 里。",
-        "- 如果缺少“角色立绘气泡热区”或“装扮按钮热区”提示，本轮必须各补 1 条明确引导玩家操作与收益的文案。",
-      ].join("\n");
-    case "asset_manifest_tool":
-      return [
-        "asset_manifest_tool 修复重点：",
-        "- 必须覆盖 UI 中真实存在的活动入口、活动卡片、扩建确认面板、订单按钮图标等载体。",
-        "- sourceDependencies 必须复用 scene/ui/story/character 中已有的真实名称，不能用抽象词替代。",
-        "- 如果 repairPlan 点名缺失某个面板、图标、热点或展示点素材，这一轮必须逐字映射到 assetGroups 中。",
-      ].join("\n");
-    default:
-      return [
-        `${stage} 修复重点：`,
-        "- 只修复结构、字段缺失、字段类型与最小内容要求。",
-        "- 保持现有任务目标和命名体系，不要额外扩展设计范围。",
-      ].join("\n");
+  return getRepairGuidance(stage);
+}
+
+/**
+ * Format a Zod / validation error into structured, field-level feedback.
+ * Inspired by Claude Code's validateInput → field-level issue pattern.
+ */
+function formatStructuredValidationError(errorMessage: string): string {
+  const lines = errorMessage.split("\n").filter(Boolean);
+  const fieldIssues: string[] = [];
+  const otherIssues: string[] = [];
+
+  for (const line of lines) {
+    if (/at\s+[«"']|path:|\.[\w]+/i.test(line)) {
+      fieldIssues.push(`  - ${line.trim()}`);
+    } else if (line.trim().length > 0) {
+      otherIssues.push(`  - ${line.trim()}`);
+    }
   }
+
+  const sections: string[] = [];
+  if (fieldIssues.length > 0) {
+    sections.push(`字段级错误（共 ${fieldIssues.length} 项，请逐项修复）：\n${fieldIssues.join("\n")}`);
+  }
+  if (otherIssues.length > 0) {
+    sections.push(`其他校验问题：\n${otherIssues.join("\n")}`);
+  }
+  return sections.length > 0 ? sections.join("\n\n") : errorMessage;
+}
+
+/**
+ * Detect if repair attempts are stuck in a loop (same error pattern repeating).
+ * Inspired by Claude Code's diminishing-returns circuit breaker.
+ */
+function detectRepairStagnation(repairHistory: Array<{ error: string }>): boolean {
+  if (repairHistory.length < 2) return false;
+  const lastTwo = repairHistory.slice(-2);
+  const sig0 = lastTwo[0].error.slice(0, 200);
+  const sig1 = lastTwo[1].error.slice(0, 200);
+  return sig0 === sig1;
 }
 
 function createRepairPrompt(params: {
@@ -225,6 +187,7 @@ function createRepairPrompt(params: {
   rawContent: string | null;
   attemptNumber: number;
   repairLimit: number;
+  repairHistory?: Array<{ error: string }>;
 }) {
   const sceneDesignAddendum =
     params.stage === "scene_design_tool" || params.stage === "scene_design_patch_tool"
@@ -233,21 +196,32 @@ function createRepairPrompt(params: {
   const urgency = params.attemptNumber >= params.repairLimit
     ? `⚠ 这是最后一次修复机会（第 ${params.attemptNumber}/${params.repairLimit} 次）。如果这次仍然不通过，工具将被标记为失败。请精确定位错误并修复。`
     : `修复尝试 ${params.attemptNumber}/${params.repairLimit}。`;
-  // Truncate rawContent to avoid blowing up the context window
+
+  // Stagnation escalation: if the same error repeats, push the LLM harder (Claude Code pattern)
+  const isStagnant = params.repairHistory && detectRepairStagnation(params.repairHistory);
+  const stagnationHint = isStagnant
+    ? "\n⚠ 上次修复未产生实质变化，相同错误重复出现。请换一种策略：重新审视整个输出结构而非只做局部调整。"
+    : "";
+
+  // Truncate rawContent to avoid blowing up the context window (Claude Code maxResultSizeChars)
   const truncatedRaw = params.rawContent && params.rawContent.length > 6000
     ? params.rawContent.slice(0, 6000) + "\n... (truncated)"
     : params.rawContent;
+
+  // Structured error formatting for clearer field-level feedback
+  const formattedError = formatStructuredValidationError(params.validationError);
+
   return [
-    `你刚才输出的 ${params.schemaName} 未通过校验。${urgency}`,
+    `你刚才输出的 ${params.schemaName} 未通过校验。${urgency}${stagnationHint}`,
     "",
     "修复规则：",
     "1. 只返回一个合法 JSON 对象，不要输出任何解释文字。",
     "2. 保持所有字段名不变。",
     "3. 精确修复校验错误指出的问题（缺字段、类型错误、长度不够、枚举不合法等）。不要改变其他已正确的内容。",
-    `3.1 ${stageRepairGuidance(params.stage)}`,
+    `3.1 ${getRepairGuidance(params.stage)}`,
     "",
     `校验错误（请逐条解决）：`,
-    params.validationError,
+    formattedError,
     "",
     `上一次输出：`,
     truncatedRaw ?? "无",
@@ -255,13 +229,18 @@ function createRepairPrompt(params: {
   ].join("\n");
 }
 
+
 function countSelfRepairs(repairHistory: NonNullable<DebugLogEntry["repairHistory"]>, repairLimit: number) {
   return Math.min(repairHistory.length, repairLimit);
 }
 
 function classifyStructuredError(error: Error) {
+  if (error instanceof APIConnectionError || error instanceof APIConnectionTimeoutError) return "network_error";
+  if (error instanceof RateLimitError) return "rate_limit";
+  if (error instanceof InternalServerError) return "server_error";
   const message = error.message.toLowerCase();
   if (message.includes("超时") || message.includes("timeout")) return "timeout";
+  if (message.includes("connection error") || message.includes("econnreset") || message.includes("fetch failed")) return "network_error";
   if (message.includes("json")) return "json_parse_error";
   if (message.includes("zod") || message.includes("invalid") || message.includes("too_small") || message.includes("too_big")) {
     return "schema_validation_error";
@@ -271,11 +250,18 @@ function classifyStructuredError(error: Error) {
 }
 
 function isTransientError(error: unknown): boolean {
+  // OpenAI SDK typed errors: connection failure, timeout, rate limit, server error
+  if (error instanceof APIConnectionError || error instanceof APIConnectionTimeoutError) return true;
+  if (error instanceof RateLimitError) return true;
+  if (error instanceof InternalServerError) return true;
+
   if (!(error instanceof Error)) return false;
   const msg = error.message.toLowerCase();
   return msg.includes("超时") || msg.includes("timeout") || msg.includes("econnreset") ||
     msg.includes("econnrefused") || msg.includes("socket hang up") || msg.includes("network") ||
-    msg.includes("fetch failed") || msg.includes("aborted");
+    msg.includes("fetch failed") || msg.includes("aborted") ||
+    msg.includes("connection error") || msg.includes("rate limit") ||
+    msg.includes("502") || msg.includes("503") || msg.includes("504");
 }
 
 async function callWithTimeoutRetry<T>(
@@ -289,10 +275,16 @@ async function callWithTimeoutRetry<T>(
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
+      // Keep a reference to fn() so we can catch its rejection if timeout wins
+      const fnPromise = fn();
       const result = await Promise.race([
-        fn(),
+        fnPromise,
         new Promise<never>((_, reject) => {
-          controller.signal.addEventListener("abort", () => reject(new Error("请求超时")), { once: true });
+          controller.signal.addEventListener("abort", () => {
+            // Swallow the dangling fn() rejection to prevent unhandled rejection crash
+            fnPromise.catch(() => {});
+            reject(new Error("请求超时"));
+          }, { once: true });
         }),
       ]);
       clearTimeout(timer);
@@ -306,7 +298,7 @@ async function callWithTimeoutRetry<T>(
         throw wrapped;
       }
       const delayMs = Math.min(1000 * Math.pow(2, retry), 15000) + Math.random() * 1000;
-      console.warn(`[callWithTimeoutRetry] ${stage} 第 ${retry + 1}/${maxRetries} 次超时重试，等待 ${Math.round(delayMs)}ms…`);
+      console.warn(`[callWithTimeoutRetry] ${stage} 第 ${retry + 1}/${maxRetries} 次瞬态错误重试，等待 ${Math.round(delayMs)}ms… (${wrapped.message.slice(0, 120)})`);
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
   }
@@ -533,6 +525,7 @@ export async function runStructuredChat<T>(params: RunStructuredChatParams<T>): 
                 rawContent,
                 attemptNumber: attempt + 1,
                 repairLimit,
+                repairHistory,
               }),
             },
         ];

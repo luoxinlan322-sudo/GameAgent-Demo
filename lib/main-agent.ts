@@ -2,27 +2,15 @@
 import { tagRepairIteration } from "./langfuse";
 import { createDebugLog, finalizeDebugLog, getLatestDebugLog, getLatestFinalizedDebugLog } from "./debug-log";
 import {
-  runAssetManifestTool,
-  runCharacterTool,
-  runCopywritingTool,
-  runEconomyTool,
-  runGameplayTool,
   runIntentTool,
-  runLayoutTool,
   runPlanningTool,
-  runProposalTool,
   runRepairTool,
-  runSceneTool,
-  runStoryTool,
-  runSystemDesignTool,
-  runTimelineTool,
   runToolSelectionTool,
-  runUiTool,
   runVerificationTool,
 } from "./agent-tools";
+import { buildToolExecutorsFromRegistry, TOOL_REGISTRY } from "./tool-registry";
 import { runLocalRepairDecisionTool, runLocalSemanticConsistencyTool, runSemanticConsistencyTool } from "./consistency-tools";
 import {
-  buildSceneRepairFocus,
   buildLocalConsistencyReport,
   buildRuleConsistencyGraph,
   buildRuleConsistencyGraphForArtifacts,
@@ -31,7 +19,7 @@ import {
 } from "./consistency-graph";
 import { evaluateProposal } from "./evaluator";
 import { validateAllPhaseContracts, type AgentPhaseArtifacts } from "./agent-phase-contracts";
-import { discoverCheckableEdges, discoverEdgesTriggeredByTool, getToolDependencies, TOOL_EXECUTION_CONFIG } from "./agent-execution-config";
+import { discoverCheckableEdges, discoverEdgesTriggeredByTool, getExecutionBatches, getToolDependencies } from "./agent-execution-config";
 import type {
   Html5PreparationPackage,
   InteractionConfigInput,
@@ -63,7 +51,6 @@ import type {
   UIInformationArchitecture,
   VerificationResult,
 } from "./schemas";
-import { getGenreProfile } from "./schemas";
 
 export type MainAgentState = {
   sessionId: string;
@@ -145,40 +132,45 @@ type RunMainAgentParams = {
   runId: string;
   persona: PersonaInput;
   langfuseParent?: LangfuseObservation;
+  /** @deprecated Use the AsyncGenerator yield instead. Kept for backward compat. */
   onEvent?: (event: AgentEvent) => void;
 };
 
 type ToolExecutorMap = Record<ToolName, () => Promise<unknown>>;
 
-const TOOL_TITLE: Record<ToolName, string> = {
-  gameplay_tool: "玩法结构工具",
-  economy_tool: "数值与经济工具",
-  system_design_tool: "系统策划工具",
-  proposal_tool: "总体策划工具",
-  scene_design_tool: "场景策划工具",
-  ui_architecture_tool: "UI 架构工具",
-  story_tool: "剧情工具",
-  character_tool: "角色工具",
-  asset_manifest_tool: "资产清单工具",
-  copywriting_tool: "文案工具",
-  layout_tool: "Layout 工具",
-  timeline_tool: "Timeline 工具",
-};
+/**
+ * Module-scoped event buffer. `runMainAgent` (the async generator) drains this
+ * between yield points so the consumer receives events in real-time.
+ */
+let _eventSink: AgentEvent[] = [];
 
-const TOOL_SUMMARY: Record<ToolName, string> = {
-  gameplay_tool: "正在定义主循环、次循环、点击链路和反馈节奏。",
-  economy_tool: "正在补齐货币、订单、升级、扩建券与装扮解锁的经济闭环。",
-  system_design_tool: "正在生成经营、扩建、任务、活动与角色互动系统。",
-  proposal_tool: "正在汇总体策划、原型范围和验证重点。",
-  scene_design_tool: "正在生成主场景布局、交互区、坑位和动线。",
-  ui_architecture_tool: "正在梳理顶栏、订单栏、任务栏、活动入口和建造面板。",
-  story_tool: "正在生成世界观、角色名单、主线剧情和剧情锚点。",
-  character_tool: "正在生成角色资料卡、系统职责和视觉关键词。",
-  asset_manifest_tool: "正在汇总素材清单、规格、命名规则和背景要求。",
-  copywriting_tool: "正在生成页面标题、按钮文案、场景提示、角色台词和资产标签。",
-  layout_tool: "正在将场景、UI 与角色结果映射成可渲染的布局和交互绑定。",
-  timeline_tool: "正在将剧情、文案与交互绑定映射成运行时时间线。",
-};
+function _pushEvent(params: RunMainAgentParams, event: AgentEvent) {
+  _eventSink.push(event);
+  params.onEvent?.(event);
+}
+
+/** Drain all buffered events and return them, resetting the buffer. */
+function _drainEvents(): AgentEvent[] {
+  const events = _eventSink;
+  _eventSink = [];
+  return events;
+}
+
+/** Yield-friendly drain: call `yield* drainAndYield()` in the generator. */
+function* drainAndYield(): Generator<AgentEvent> {
+  for (const event of _drainEvents()) {
+    yield event;
+  }
+}
+
+// Derive title/summary maps from the unified registry
+const TOOL_TITLE: Record<ToolName, string> = Object.fromEntries(
+  Object.values(TOOL_REGISTRY).map((def) => [def.tool, def.title]),
+) as Record<ToolName, string>;
+
+const TOOL_SUMMARY: Record<ToolName, string> = Object.fromEntries(
+  Object.values(TOOL_REGISTRY).map((def) => [def.tool, def.summary]),
+) as Record<ToolName, string>;
 
 const FULL_GENERATION_TOOL_ORDER: ToolName[] = [
   "gameplay_tool",
@@ -200,7 +192,7 @@ function appendMessage(state: MainAgentState, role: "system" | "assistant" | "to
 }
 
 function emit(params: RunMainAgentParams, event: AgentEvent) {
-  params.onEvent?.(event);
+  _pushEvent(params, event);
 }
 
 function createSystemNodeLog(params: RunMainAgentParams, state: MainAgentState, stage: string, phase: string, title: string, requestPayload: unknown) {
@@ -271,19 +263,38 @@ function reviewContextText(state: MainAgentState) {
   }
 
   const lastReview = state.reviewHistory[state.reviewHistory.length - 1];
-  return [
-    lastReview ? `上一轮结论：第 ${lastReview.round} 轮 / ${lastReview.decision} / ${lastReview.score} 分 / ${lastReview.returned ? "已退回" : "已通过"}` : "",
-    lastReview?.returnReasons.length ? `上一轮退回原因：${lastReview.returnReasons.join("；")}` : "",
-    lastReview?.repairDirections.length ? `上一轮修缮方向：${lastReview.repairDirections.join("；")}` : "",
-    state.repairPlan
-      ? `当前返修 rationale：${state.repairPlan.rationale}；目标工具：${state.repairPlan.selectedTargets
-          .map((item) => item.toolName)
-          .join(", ")}`
-      : "",
-    state.consistencyReport ? `当前一致性摘要：${state.consistencyReport.summary}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
+  const lines: string[] = [];
+
+  // Progressive compression: on iteration 3+, add a one-line summary of each prior round
+  if (state.iterationCount >= 3 && state.reviewHistory.length > 1) {
+    const olderRounds = state.reviewHistory.slice(0, -1);
+    lines.push(
+      `历史轮次概要(${olderRounds.length}轮)：` +
+      olderRounds.map((r) => `第${r.round}轮/${r.decision}/${r.score}分/${r.failedEdges.slice(0, 3).join(",")}`).join("；"),
+    );
+  }
+
+  if (lastReview) {
+    lines.push(`上一轮结论：第 ${lastReview.round} 轮 / ${lastReview.decision} / ${lastReview.score} 分 / ${lastReview.returned ? "已退回" : "已通过"}`);
+  }
+  if (lastReview?.returnReasons.length) {
+    lines.push(`上一轮退回原因：${lastReview.returnReasons.join("；")}`);
+  }
+  if (lastReview?.repairDirections.length) {
+    lines.push(`上一轮修缮方向：${lastReview.repairDirections.join("；")}`);
+  }
+  if (state.repairPlan) {
+    lines.push(
+      `当前返修 rationale：${state.repairPlan.rationale}；目标工具：${state.repairPlan.selectedTargets
+        .map((item) => item.toolName)
+        .join(", ")}`,
+    );
+  }
+  if (state.consistencyReport) {
+    lines.push(`当前一致性摘要：${state.consistencyReport.summary}`);
+  }
+
+  return lines.filter(Boolean).join("\n");
 }
 
 function recordReview(state: MainAgentState) {
@@ -589,159 +600,23 @@ function summarizeOutput(tool: ToolName, output: unknown) {
 }
 
 function createToolExecutors(params: RunMainAgentParams, state: MainAgentState): ToolExecutorMap {
-  const genreProfile = getGenreProfile(params.persona.targetGenre);
-  return {
-    gameplay_tool: async () => {
-      state.gameplay = await runGameplayTool(params.persona, state.plan!, state.iterationCount, {
-        sessionId: params.sessionId,
-        runId: params.runId,
-        iteration: state.iterationCount,
-        langfuseParent: params.langfuseParent,
-      }, state.repairPlan, state.gameplay);
-      return state.gameplay;
-    },
-    economy_tool: async () => {
-      state.economy = await runEconomyTool(params.persona, state.plan!, state.gameplay!, state.iterationCount, {
-        sessionId: params.sessionId,
-        runId: params.runId,
-        iteration: state.iterationCount,
-        langfuseParent: params.langfuseParent,
-      }, state.repairPlan, genreProfile, state.economy);
-      return state.economy;
-    },
-    system_design_tool: async () => {
-      state.systems = await runSystemDesignTool(params.persona, state.plan!, state.gameplay!, state.economy, state.iterationCount, {
-        sessionId: params.sessionId,
-        runId: params.runId,
-        iteration: state.iterationCount,
-        langfuseParent: params.langfuseParent,
-      }, state.repairPlan, genreProfile, state.systems);
-      return state.systems;
-    },
-    proposal_tool: async () => {
-      state.proposal = await runProposalTool(params.persona, state.plan!, state.gameplay!, state.economy!, state.systems!, state.iterationCount, {
-        sessionId: params.sessionId,
-        runId: params.runId,
-        iteration: state.iterationCount,
-        langfuseParent: params.langfuseParent,
-      }, state.repairPlan, state.proposal);
-      return state.proposal;
-    },
-    scene_design_tool: async () => {
-      state.scene = await runSceneTool(params.persona, state.plan!, state.gameplay!, state.systems!, state.proposal!, state.iterationCount, {
-        sessionId: params.sessionId,
-        runId: params.runId,
-        iteration: state.iterationCount,
-        langfuseParent: params.langfuseParent,
-      }, state.repairPlan, state.scene, buildSceneRepairFocus(state.consistencyReport), genreProfile);
-      return state.scene;
-    },
-    ui_architecture_tool: async () => {
-      state.ui = await runUiTool(params.persona, state.plan!, state.systems!, state.scene!, state.iterationCount, {
-        sessionId: params.sessionId,
-        runId: params.runId,
-        iteration: state.iterationCount,
-        langfuseParent: params.langfuseParent,
-      }, state.repairPlan, genreProfile, state.ui);
-      return state.ui;
-    },
-    story_tool: async () => {
-      state.story = await runStoryTool(params.persona, state.plan!, state.proposal!, state.systems!, state.iterationCount, {
-        sessionId: params.sessionId,
-        runId: params.runId,
-        iteration: state.iterationCount,
-        langfuseParent: params.langfuseParent,
-      }, state.repairPlan, state.story);
-      return state.story;
-    },
-    character_tool: async () => {
-      state.characterCards = await runCharacterTool(params.persona, state.plan!, state.systems!, state.story!, state.iterationCount, {
-        sessionId: params.sessionId,
-        runId: params.runId,
-        iteration: state.iterationCount,
-        langfuseParent: params.langfuseParent,
-      }, state.repairPlan, state.characterCards);
-      return state.characterCards;
-    },
-    asset_manifest_tool: async () => {
-      state.assetManifest = await runAssetManifestTool(
-        params.persona,
-        state.plan!,
-        state.proposal!,
-        state.economy!,
-        state.scene!,
-        state.ui!,
-        state.story!,
-        state.characterCards!,
-        state.iterationCount,
-        {
-          sessionId: params.sessionId,
-          runId: params.runId,
-          iteration: state.iterationCount,
-          langfuseParent: params.langfuseParent,
-        },
-        state.repairPlan,
-        state.assetManifest,
-      );
-      return state.assetManifest;
-    },
-    copywriting_tool: async () => {
-      state.copywriting = await runCopywritingTool(
-        params.persona,
-        state.plan!,
-        state.proposal!,
-        state.economy!,
-        state.scene!,
-        state.ui!,
-        state.story!,
-        state.characterCards!,
-        state.assetManifest!,
-        state.iterationCount,
-        {
-          sessionId: params.sessionId,
-          runId: params.runId,
-          iteration: state.iterationCount,
-          langfuseParent: params.langfuseParent,
-        },
-        state.repairPlan,
-        state.copywriting,
-      );
-      return state.copywriting;
-    },
-    layout_tool: async () => {
-      const creativePack = createCreativePack(state);
-      if (!state.proposal || !creativePack) {
-        throw new Error("layout_tool requires proposal and a complete creative pack.");
-      }
-      const { layoutConfig, interactionConfig, sceneDefinitions } = runLayoutTool(params.persona, state.proposal, creativePack);
-      state.sceneDefinitions = sceneDefinitions;
-      state.interactionConfig = interactionConfig;
-      state.layoutConfig = layoutConfig;
-      return { layoutConfig, interactionConfig, sceneDefinitions };
-    },
-    timeline_tool: async () => {
-      const creativePack = createCreativePack(state);
-      if (!state.proposal || !creativePack) {
-        throw new Error("timeline_tool requires proposal and a complete creative pack.");
-      }
-      const { html5Projection, timelineConfig, lightingRenderConfig } = runTimelineTool(params.persona, state.proposal, creativePack);
-      state.timelineConfig = timelineConfig;
-      state.lightingRenderConfig = lightingRenderConfig;
-      state.html5Preparation = html5Projection;
-      return { timelineConfig, lightingRenderConfig, html5Projection };
-    },
-  };
+  return buildToolExecutorsFromRegistry(
+    state,
+    params.persona,
+    { sessionId: params.sessionId, runId: params.runId, iteration: state.iterationCount, langfuseParent: params.langfuseParent },
+    createCreativePack,
+  );
 }
 
 async function executeTool(params: RunMainAgentParams, state: MainAgentState, executors: ToolExecutorMap, tool: ToolName) {
   if (!canRunTool(state, tool)) {
-    const toolConfig = TOOL_EXECUTION_CONFIG[tool];
+    const toolDef = TOOL_REGISTRY[tool];
     console.warn(`[executeTool] ${tool} 跳过：依赖未就绪。`);
     emit(params, {
       type: "node",
       node: tool,
       phase: "工具",
-      title: toolConfig.title,
+      title: toolDef.title,
       status: "fallback",
       iteration: state.iterationCount,
       summary: `工具跳过（依赖未就绪，将由修复循环补齐）`,
@@ -749,8 +624,8 @@ async function executeTool(params: RunMainAgentParams, state: MainAgentState, ex
     });
     return null;
   }
-  const toolConfig = TOOL_EXECUTION_CONFIG[tool];
-  emitRunningNode(params, state, tool, "工具", toolConfig.title, toolConfig.summary);
+  const toolDef = TOOL_REGISTRY[tool];
+  emitRunningNode(params, state, tool, "工具", toolDef.title, toolDef.summary);
   try {
     const output = await executors[tool]();
     const status = resolveNodeStatus(params.runId, tool, state.iterationCount);
@@ -758,7 +633,7 @@ async function executeTool(params: RunMainAgentParams, state: MainAgentState, ex
       type: "node",
       node: tool,
       phase: "工具",
-      title: toolConfig.title,
+      title: toolDef.title,
       status: status.status,
       iteration: state.iterationCount,
       summary: status.error ?? summarizeOutput(tool, output),
@@ -772,7 +647,7 @@ async function executeTool(params: RunMainAgentParams, state: MainAgentState, ex
       type: "node",
       node: tool,
       phase: "工具",
-      title: toolConfig.title,
+      title: toolDef.title,
       status: "fallback",
       iteration: state.iterationCount,
       summary: `工具执行失败（将由修复循环重试）：${msg.slice(0, 120)}`,
@@ -793,9 +668,14 @@ async function runLocalConsistencyLoop(
   let previousDecision: LocalRepairDecision | null = null;
   const repairAttemptHistory: RepairAttemptRecord[] = [];
   // Track consecutive no-progress rounds for early termination
-  let prevFailedEdgeSignature = "";
+  // Uses failure COUNT (not exact edge set) so oscillating edges still count as "no progress"
+  let prevFailedEdgeCount = -1;
   let noProgressStreak = 0;
-  let edgesToCheck = discoverEdgesTriggeredByTool(triggerTool, getResolvedToolsFromState(state)).map((edge) => edge.edgeId);
+  // Anchor edgesToCheck to ONLY triggerTool's own edges — don't expand when repairing upstream
+  const triggerToolEdgeIds = new Set(
+    discoverEdgesTriggeredByTool(triggerTool, getResolvedToolsFromState(state)).map((edge) => edge.edgeId),
+  );
+  let edgesToCheck = [...triggerToolEdgeIds];
 
   while (edgesToCheck.length > 0) {
     const artifacts = buildConsistencyArtifactsFromState(state, params.persona.targetGenre);
@@ -910,19 +790,18 @@ async function runLocalConsistencyLoop(
       return;
     }
 
-    // No-progress early termination: if the exact same edges keep failing, stop early
-    const currentFailedEdgeSignature = localReport.hardFailures
-      .map((edge) => edge.edgeId)
-      .sort()
-      .join(",");
-    if (currentFailedEdgeSignature === prevFailedEdgeSignature) {
+    // No-progress early termination: track hard-failure count across iterations.
+    // If the count doesn't decrease, we're not making real progress (catches oscillating edge sets).
+    const currentFailedCount = localReport.hardFailures.length;
+    if (currentFailedCount >= prevFailedEdgeCount && prevFailedEdgeCount >= 0) {
       noProgressStreak += 1;
     } else {
       noProgressStreak = 0;
-      prevFailedEdgeSignature = currentFailedEdgeSignature;
     }
+    prevFailedEdgeCount = currentFailedCount;
     if (noProgressStreak >= 2) {
-      console.warn(`${TOOL_TITLE[triggerTool]} 局部修复连续 ${noProgressStreak} 轮无进展（失败边不变: ${currentFailedEdgeSignature}），提前终止交由全局处理。`);
+      const edgeNames = localReport.hardFailures.map((edge) => edge.edgeId).join(", ");
+      console.warn(`${TOOL_TITLE[triggerTool]} 局部修复连续 ${noProgressStreak} 轮无进展（失败数未减少: ${currentFailedCount}，边: ${edgeNames}），提前终止交由全局处理。`);
       return;
     }
 
@@ -971,10 +850,8 @@ async function runLocalConsistencyLoop(
     // Multi-tool coalescing: when the same edges keep failing (noProgressStreak >= 1),
     // force ALL involved tools from the stuck edges into the repair targets. This prevents
     // the ping-pong pattern where two tools alternate without converging (e.g. system_scene).
-    if (noProgressStreak >= 1 && prevFailedEdgeSignature) {
-      const stuckEdgeIds = new Set(prevFailedEdgeSignature.split(","));
+    if (noProgressStreak >= 1) {
       const allInvolvedTools = localReport.hardFailures
-        .filter((e) => stuckEdgeIds.has(e.edgeId))
         .flatMap((e) => e.involvedTools);
       const runnableSet = new Set(runnableSelectedTargets);
       for (const tool of allInvolvedTools) {
@@ -1044,18 +921,24 @@ async function runLocalConsistencyLoop(
       repairGoal: repairGoalBefore,
     });
 
+    // Only recheck edges anchored to the original triggerTool — don't expand
+    // to include all repair-target edges, which causes cascading discovery of
+    // unrelated failures and prevents convergence.
     edgesToCheck = Array.from(
       new Set([
-        ...decision.recheckEdges,
+        ...decision.recheckEdges.filter((eid) => triggerToolEdgeIds.has(eid)),
         ...discoverCheckableEdges(getResolvedToolsFromState(state), {
-          onlyAffectedTools: [triggerTool, ...runnableSelectedTargets],
+          onlyAffectedTools: [triggerTool],
         }).map((edge) => edge.edgeId),
       ]),
     );
   }
 }
 
-export async function runMainAgent(params: RunMainAgentParams): Promise<MainAgentState> {
+export async function* runMainAgent(params: RunMainAgentParams): AsyncGenerator<AgentEvent, MainAgentState> {
+  // Reset module-scoped event buffer for this run
+  _eventSink = [];
+
   const maxIterations = Math.max(1, Number(process.env.MAX_AGENT_REPAIR_ITERATIONS || "5"));
   const state: MainAgentState = {
     sessionId: params.sessionId,
@@ -1111,6 +994,7 @@ export async function runMainAgent(params: RunMainAgentParams): Promise<MainAgen
     summary: "已读取项目简报。",
     output: { persona: params.persona },
   });
+  yield* drainAndYield();
 
   // ── Global repair & tool-augmentation loop ──────────────────────────────
   // Iteration 1: run all 12 tools via ensureToolCoverage.
@@ -1137,6 +1021,7 @@ export async function runMainAgent(params: RunMainAgentParams): Promise<MainAgen
     summary: state.intent.taskDefinition,
     output: state.intent,
   });
+  yield* drainAndYield();
 
   emitRunningNode(params, state, "planning", "规划", "规划拆解", "正在制定本轮任务拆分与并发计划。");
   state.plan = await runPlanningTool(params.persona, state.intent, {
@@ -1156,6 +1041,7 @@ export async function runMainAgent(params: RunMainAgentParams): Promise<MainAgen
     output: state.plan,
   });
   emit(params, { type: "plan", plan: state.plan });
+  yield* drainAndYield();
 
   emitRunningNode(params, state, "tool_selection", "规划", "工具选择", "正在自主决定本轮最小必要工具集。");
   state.toolSelection = await runToolSelectionTool(
@@ -1182,12 +1068,23 @@ export async function runMainAgent(params: RunMainAgentParams): Promise<MainAgen
     summary: state.toolSelection.toolQueue.join(" -> "),
     output: state.toolSelection,
   });
+  yield* drainAndYield();
 
   const executors = createToolExecutors(params, state);
   const plannedQueue = sortToolsByExecutionOrder(state.toolSelection.toolQueue);
-  for (const tool of plannedQueue) {
-    await executeTool(params, state, executors, tool);
-    await runLocalConsistencyLoop(params, state, executors, tool);
+  // ── Dependency-graph concurrent execution ──
+  // Group tools into topological batches; run each batch with Promise.all
+  const preResolved = getResolvedToolsFromState(state);
+  const batches = getExecutionBatches(plannedQueue, preResolved);
+  for (const batch of batches) {
+    // Execute all tools in this batch concurrently
+    await Promise.all(batch.map((tool) => executeTool(params, state, executors, tool)));
+    yield* drainAndYield();
+    // Run local consistency loops sequentially per tool (they mutate shared state)
+    for (const tool of batch) {
+      await runLocalConsistencyLoop(params, state, executors, tool);
+      yield* drainAndYield();
+    }
   }
 
   // Emit phase contract checks
@@ -1219,6 +1116,7 @@ export async function runMainAgent(params: RunMainAgentParams): Promise<MainAgen
     throw new Error("主 Agent 未能组装完整设计包。");
   }
   emit(params, { type: "generation", generation: { proposal: state.proposal, creativePack } });
+  yield* drainAndYield();
 
   const ruleLog = createSystemNodeLog(params, state, "rule_consistency_check", "反馈", "规则一致性检查", { proposal: state.proposal, creativePack });
   const ruleEdges = buildRuleConsistencyGraph(state.proposal, creativePack, state.html5Preparation, params.persona.targetGenre);
@@ -1304,6 +1202,7 @@ export async function runMainAgent(params: RunMainAgentParams): Promise<MainAgen
     output: state.consistencyReport,
   });
   emit(params, { type: "consistency_report", report: state.consistencyReport });
+  yield* drainAndYield();
 
   emitRunningNode(params, state, "evaluation_tool", "反馈", "评估工具", "正在从当前原型可执行性角度评审设计包。");
   state.evaluation = await evaluateProposal(
@@ -1332,6 +1231,7 @@ export async function runMainAgent(params: RunMainAgentParams): Promise<MainAgen
     output: state.evaluation,
   });
   emit(params, { type: "evaluation", evaluation: state.evaluation });
+  yield* drainAndYield();
 
   emitRunningNode(params, state, "verification", "反馈", "验证节点", "正在决定当前结果是否可以结束。");
   state.verification = await runVerificationTool(
@@ -1362,6 +1262,7 @@ export async function runMainAgent(params: RunMainAgentParams): Promise<MainAgen
 
   recordReview(state);
   emit(params, { type: "review_history", history: state.reviewHistory });
+  yield* drainAndYield();
 
   // ── Global loop exit / continue decision ──
   if (!state.verification?.needsRepair || state.iterationCount >= state.maxIterations) {
@@ -1400,6 +1301,7 @@ export async function runMainAgent(params: RunMainAgentParams): Promise<MainAgen
   state.iterationCount += 1;
   state.globalRepairCount += 1;
   console.log(`[runMainAgent] 进入第 ${state.iterationCount} 轮全局修缮迭代。修缮工具：${state.repairPlan.repairTools.join(", ")}`);
+  yield* drainAndYield();
 
   } // end while (global repair loop)
 
@@ -1433,6 +1335,7 @@ export async function runMainAgent(params: RunMainAgentParams): Promise<MainAgen
     emit(params, { type: "html5_preparation", html5Preparation: state.finalResult.html5Preparation });
   }
   emit(params, { type: "review_history", history: state.reviewHistory });
+  yield* drainAndYield();
 
   return state;
 }

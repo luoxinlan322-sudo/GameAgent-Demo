@@ -10,13 +10,33 @@ import { CharacterCarousel, StoryBoard } from "./story-character-board";
 
 type ResultTabsProps = {
   persona: PersonaInput;
-  plan: AgentPlan;
-  proposal: GameProposal;
-  creativePack: CreativePack;
+  plan: AgentPlan | null;
+  proposal: GameProposal | null;
+  creativePack: CreativePack | null;
   html5Preparation: Html5PreparationPackage | null;
-  evaluation: Evaluation;
+  evaluation: Evaluation | null;
   reviewHistory: ReviewHistoryItem[];
+  isStreaming?: boolean;
 };
+
+function getTabAvailability(props: ResultTabsProps): Record<TabKey, boolean> {
+  return {
+    proposal: Boolean(props.proposal),
+    gameplay: Boolean(props.creativePack),
+    economy: Boolean(props.creativePack),
+    systems: Boolean(props.creativePack),
+    scene: Boolean(props.creativePack),
+    ui: Boolean(props.creativePack),
+    story: Boolean(props.creativePack),
+    characters: Boolean(props.creativePack),
+    assets: Boolean(props.creativePack),
+    copywriting: Boolean(props.creativePack),
+    layout: Boolean(props.html5Preparation),
+    timeline: Boolean(props.html5Preparation),
+    interaction: Boolean(props.html5Preparation),
+    evaluation: Boolean(props.evaluation),
+  };
+}
 
 const tabLabels = {
   proposal: "总体策划",
@@ -141,8 +161,13 @@ function MetricStrip({ items }: { items: Array<{ label: string; value: string | 
   );
 }
 
-export function ResultTabs({ persona, plan, proposal, creativePack, html5Preparation, evaluation, reviewHistory }: ResultTabsProps) {
+export function ResultTabs(props: ResultTabsProps) {
+  const { persona, plan, proposal, creativePack, html5Preparation, evaluation, reviewHistory, isStreaming } = props;
+  const availability = getTabAvailability(props);
   const [activeTab, setActiveTab] = useState<TabKey>("proposal");
+
+  // Auto-select first available tab if current isn't available
+  const effectiveTab = availability[activeTab] ? activeTab : (tabs.find((t) => availability[t]) ?? activeTab);
 
   const layoutSceneCount = html5Preparation?.layoutConfig?.scenes.length ?? 0;
   const layoutElementCount = html5Preparation?.layoutConfig?.scenes.reduce((sum, scene) => sum + scene.elements.length, 0) ?? 0;
@@ -155,16 +180,25 @@ export function ResultTabs({ persona, plan, proposal, creativePack, html5Prepara
   return (
     <section className="panel card result-tab-shell">
       <div className="tab-row result-tab-row">
-        {tabs.map((tab) => (
-          <button key={tab} type="button" className={`tab-button${activeTab === tab ? " is-active" : ""}`} onClick={() => setActiveTab(tab)}>
-            {tabLabels[tab]}
-          </button>
-        ))}
+        {tabs.map((tab) => {
+          const available = availability[tab];
+          return (
+            <button
+              key={tab}
+              type="button"
+              className={`tab-button${effectiveTab === tab ? " is-active" : ""}${!available ? " is-disabled" : ""}${!available && isStreaming ? " is-loading" : ""}`}
+              onClick={() => available && setActiveTab(tab)}
+              disabled={!available}
+            >
+              {tabLabels[tab]}
+            </button>
+          );
+        })}
       </div>
 
-      {activeTab === "proposal" ? <ProposalCard persona={persona} plan={plan} proposal={proposal} /> : null}
+      {effectiveTab === "proposal" && proposal ? <ProposalCard persona={persona} plan={plan!} proposal={proposal} /> : null}
 
-      {activeTab === "gameplay" ? (
+      {effectiveTab === "gameplay" && creativePack ? (
         <SectionCard title={tabLabels.gameplay}>
           <TextSection title="一句话循环" body={creativePack.gameplay.oneSentenceLoop} />
           <div className="proposal-layout">
@@ -178,7 +212,7 @@ export function ResultTabs({ persona, plan, proposal, creativePack, html5Prepara
         </SectionCard>
       ) : null}
 
-      {activeTab === "economy" ? (
+      {effectiveTab === "economy" && creativePack ? (
         <SectionCard title={tabLabels.economy}>
           <div className="proposal-layout">
             <ListSection title="核心货币" items={creativePack.economy.coreCurrencies} />
@@ -193,7 +227,7 @@ export function ResultTabs({ persona, plan, proposal, creativePack, html5Prepara
         </SectionCard>
       ) : null}
 
-      {activeTab === "systems" ? (
+      {effectiveTab === "systems" && creativePack ? (
         <SectionCard title={tabLabels.systems}>
           <TextSection title="系统总览" body={creativePack.systems.systemOverview} />
           <div className="proposal-layout">
@@ -208,7 +242,7 @@ export function ResultTabs({ persona, plan, proposal, creativePack, html5Prepara
         </SectionCard>
       ) : null}
 
-      {activeTab === "scene" ? (
+      {effectiveTab === "scene" && creativePack ? (
         <SectionCard title={tabLabels.scene}>
           <TextSection title="场景概念" body={creativePack.scene.sceneConcept} />
           <div className="proposal-layout">
@@ -222,7 +256,7 @@ export function ResultTabs({ persona, plan, proposal, creativePack, html5Prepara
         </SectionCard>
       ) : null}
 
-      {activeTab === "ui" ? (
+      {effectiveTab === "ui" && creativePack ? (
         <SectionCard title={tabLabels.ui}>
           <div className="proposal-layout">
             <ListSection title="顶栏" items={creativePack.ui.topBar} />
@@ -236,10 +270,10 @@ export function ResultTabs({ persona, plan, proposal, creativePack, html5Prepara
         </SectionCard>
       ) : null}
 
-      {activeTab === "story" ? <StoryBoard story={creativePack.story} /> : null}
-      {activeTab === "characters" ? <CharacterCarousel cards={creativePack.characters} /> : null}
+      {effectiveTab === "story" && creativePack ? <StoryBoard story={creativePack.story} /> : null}
+      {effectiveTab === "characters" && creativePack ? <CharacterCarousel cards={creativePack.characters} /> : null}
 
-      {activeTab === "assets" ? (
+      {effectiveTab === "assets" && creativePack ? (
         <SectionCard title={tabLabels.assets}>
           <TextSection title="视觉风格" body={creativePack.assetManifest.visualStyle} />
           <div className="proposal-layout">
@@ -283,7 +317,7 @@ export function ResultTabs({ persona, plan, proposal, creativePack, html5Prepara
         </SectionCard>
       ) : null}
 
-      {activeTab === "copywriting" ? (
+      {effectiveTab === "copywriting" && creativePack ? (
         <SectionCard title={tabLabels.copywriting}>
           <div className="proposal-layout">
             <CopySection title="页面标题" items={creativePack.copywriting?.pageTitles ?? []} />
@@ -299,7 +333,7 @@ export function ResultTabs({ persona, plan, proposal, creativePack, html5Prepara
         </SectionCard>
       ) : null}
 
-      {activeTab === "layout" ? (
+      {effectiveTab === "layout" ? (
         <SectionCard title={tabLabels.layout}>
           <MetricStrip
             items={[
@@ -315,7 +349,7 @@ export function ResultTabs({ persona, plan, proposal, creativePack, html5Prepara
         </SectionCard>
       ) : null}
 
-      {activeTab === "timeline" ? (
+      {effectiveTab === "timeline" ? (
         <SectionCard title={tabLabels.timeline}>
           <MetricStrip
             items={[
@@ -327,7 +361,7 @@ export function ResultTabs({ persona, plan, proposal, creativePack, html5Prepara
         </SectionCard>
       ) : null}
 
-      {activeTab === "interaction" ? (
+      {effectiveTab === "interaction" ? (
         <SectionCard title={tabLabels.interaction}>
           <MetricStrip
             items={[
@@ -344,7 +378,7 @@ export function ResultTabs({ persona, plan, proposal, creativePack, html5Prepara
         </SectionCard>
       ) : null}
 
-      {activeTab === "evaluation" ? <EvaluationReport evaluation={evaluation} reviewHistory={reviewHistory} /> : null}
+      {effectiveTab === "evaluation" && evaluation ? <EvaluationReport evaluation={evaluation} reviewHistory={reviewHistory} /> : null}
     </section>
   );
 }
